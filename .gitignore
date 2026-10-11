@@ -1,0 +1,12 @@
+# gradle
+.gradle/
+build/
+
+# dev game runs
+run/
+logs/
+
+# ide
+.idea/
+*.iml
+.vscode/

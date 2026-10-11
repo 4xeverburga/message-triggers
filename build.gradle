@@ -1,0 +1,55 @@
+plugins {
+	id 'fabric-loom' version '1.18.4'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	// Client command API (/mtriggers in-game config). Ships inside fabric-api.
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+	// Pure-logic unit tests (ChatLineParser) — no Minecraft classes needed.
+	testImplementation platform('org.junit:junit-bom:5.11.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// Gson comes with Minecraft at runtime; declared here so the plain test
+	// task (which does not put Minecraft on the classpath) can use it.
+	testImplementation 'com.google.code.gson:gson:2.10.1'
+	// BridgeConfig logs load warnings via slf4j; provide it (silent) for tests.
+	testImplementation 'org.slf4j:slf4j-api:2.0.16'
+	testRuntimeOnly 'org.slf4j:slf4j-nop:2.0.16'
+}
+
+test {
+	useJUnitPlatform()
+}
+
+// TODO(runClient): full-fidelity pre-launch verification via a dev vanilla
+// client (`./gradlew runClient`) — verifies the actual mixin injection point
+// against a real game without touching the Permadeath instance. Deferred by
+// owner decision; for now the mixin target is verified by launching the real
+// instance and checking logs/latest.log for the messagetriggers lines.
+
+processResources {
+	inputs.property 'version', project.version
+	filesMatching('fabric.mod.json') {
+		expand 'version': project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
