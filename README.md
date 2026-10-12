@@ -13,6 +13,16 @@ localhost HTTP agent bridge.
 - Feedback-loop guard: the server echo of a reply the mod sent is never
   treated as a trigger, even if it starts with the trigger phrase.
 
+## Middleware contract (for middleware / agent developers)
+
+If you are writing the HTTP side that this mod talks to (or wiring up a
+real agent behind it), everything you need lives in
+[`docs/middleware-contract.md`](docs/middleware-contract.md): the
+`POST /api/chat` payload shape, the `{"reply": ...}` response contract and
+its status conventions, display/feedback-loop behavior, tunables, and a
+minimal compatibility checklist. `e2e/stub-middleware.py` is a runnable
+reference implementation.
+
 ## In-game configuration
 
 Every tunable can be changed in-game via `/mtriggers`:
