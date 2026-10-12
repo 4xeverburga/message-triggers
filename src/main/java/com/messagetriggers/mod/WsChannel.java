@@ -26,10 +26,13 @@ import java.util.function.BiConsumer;
  * optional (default local), unknown modes NON-canonical values drop the frame.
  *
  * Semantics:
- *  - listen-only: the mod sends nothing on this socket in v1
+ *  - listen-only: the mod sends nothing on this socket, ever
  *  - auto-reconnect with exponential backoff (1s → 30s cap) that resets on
  *    a successful open, and one connect attempt at a time
  *  - stop() ends the channel for good (the game is shutting down)
+ *
+ * Since v2 this is the mod's ONLY inbound reply path — trigger replies,
+ * busy/timeout notices and proactive pings all arrive as frames here.
  */
 public final class WsChannel implements WebSocket.Listener {
 	/** Displays a decoded push on the client thread (implementations handle null-bridge). */

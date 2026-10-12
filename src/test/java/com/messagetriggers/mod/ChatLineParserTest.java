@@ -56,21 +56,4 @@ class ChatLineParserTest {
 		assertEquals("{\"sender\":\"alice\",\"message\":\"say \\\"hi\\\" \\\\ o/\\nnice\"}", json);
 		assertEquals("alice", parsed[0]);
 	}
-
-	@Test
-	void extractsReplyFromEveryMiddlewareStatus() {
-		assertEquals("rename test ok", ChatLineParser.extractReply("{\"reply\":\"rename test ok\",\"role\":\"owner\"}"));
-		assertEquals("The bridge is busy.", ChatLineParser.extractReply("{\"reply\":\"The bridge is busy.\"}"));
-		// Escaped content round-trips.
-		assertEquals("quote \" and \\ back", ChatLineParser.extractReply("{\"reply\":\"quote \\\" and \\\\ back\"}"));
-	}
-
-	@Test
-	void returnsNullForUnusableBodies() {
-		assertNull(ChatLineParser.extractReply(null));
-		assertNull(ChatLineParser.extractReply(""));
-		assertNull(ChatLineParser.extractReply("not json"));
-		assertNull(ChatLineParser.extractReply("{\"status\":\"logged\"}"));
-		assertNull(ChatLineParser.extractReply("{\"reply\":null}"));
-	}
 }

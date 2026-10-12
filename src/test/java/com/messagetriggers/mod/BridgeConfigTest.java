@@ -35,7 +35,7 @@ class BridgeConfigTest {
 		assertEquals("Message Triggers failed to answer.", config.failureMessage());
 		assertEquals(true, config.publicReplies());
 		assertEquals(16, config.sentMemory());
-		assertEquals(false, config.wsEnabled());
+		assertEquals(true, config.wsEnabled());
 	}
 
 	@Test
@@ -61,7 +61,7 @@ class BridgeConfigTest {
 	}
 
 	@Test
-	void wsEnabledIsOptionalAndDefaultsToFalse() throws IOException {
+	void wsEnabledIsOptionalAndDefaultsToTrue() throws IOException {
 		Path file = tempDir.resolve("bridge.json");
 		Files.writeString(file, """
 				{
@@ -73,7 +73,8 @@ class BridgeConfigTest {
 					"sentMemory": 16
 				}
 				""");
-		assertEquals(false, BridgeConfig.load(file).wsEnabled());
+		// Absent means true: the push channel is the only reply path (v2).
+		assertEquals(true, BridgeConfig.load(file).wsEnabled());
 		Files.writeString(file, """
 				{
 					"middlewareBase": "http://127.0.0.1:3000",
@@ -140,7 +141,7 @@ class BridgeConfigTest {
 		assertEquals(false, base.with("wsEnabled", "false").wsEnabled());
 		// original is never mutated
 		assertEquals(16, base.sentMemory());
-		assertEquals(false, base.wsEnabled());
+		assertEquals(true, base.wsEnabled());
 	}
 
 	@Test

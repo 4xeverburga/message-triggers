@@ -10,28 +10,27 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
-import java.util.function.Consumer;
 
 /**
- * The chat → middleware bridge. Mirrors the ChatTriggers module contract
- * (contracts/api.md mod contract):
+ * The chat → middleware bridge (contract v2):
  *
- *  - Every chat line shaped "<player> message" is POSTed to /api/chat
- *    (fire-and-forget when it is not a trigger message — history ingestion).
- *  - Trigger messages show the thinking ack immediately, then echo the
- *    middleware's reply verbatim (200 answer, 429 busy, 504 timeout, 502
- *    failure all carry a human-readable reply).
- *  - HTTP is asynchronous and the response is marshalled back onto the
- *    client thread — a synchronous wait would freeze the game for the whole
- *    agent timeout.
- *  - With publicReplies enabled the reply is SENT to the server as the
- *    player (everyone in chat sees it); otherwise it only echoes locally.
- *    The thinking ack always stays local (it is transient noise).
- *  - Feedback loop guard: the server echo of a reply we sent comes back
+ *  - Every chat line shaped "<player> message" is POSTed to /api/chat as a
+ *    ONE-WAY notification (history ingestion). The response body is never
+ *    read — nothing replies over the POST response (that was the v1
+ *    contract, removed).
+ *  - ALL middleware→player messages travel the WS push channel
+ *    (WsChannel → pushLocal/pushPublic): trigger replies, busy/timeout
+ *    notices, proactive pings.
+ *  - The thinking ack is shown the moment a trigger is typed (transient
+ *    local noise). If the POST itself fails at the network level, the
+ *    trigger never reached the middleware — failureMessage is shown then.
+ *    A slow agent is the middleware's problem: it should push a notice.
+ *  - Message display rules (local echo vs send-to-server-as-player) live
+ *    in deliver() and apply to every push.
+ *  - Feedback loop guard: the server echo of a message we sent comes back
  *    shaped "<player> message" like any other chat. Those echoes are still
  *    POSTed (so replies enter the chat history) but are never treated as
- *    triggers, even if the reply text happens to start with the trigger
- *    phrase.
+ *    triggers, even if the text happens to start with the trigger phrase.
  *
  * All tunables come from bridge.json via BridgeConfig (bundled defaults are
  * used when the file is missing — see BridgeConfig). Config can be changed
@@ -98,59 +97,51 @@ public final class Bridge {
 		String sender = parsed[0];
 		String message = parsed[1];
 
-		// Echo of a reply we sent as the player: log it as history but never
-		// let it act as a trigger (even if it starts with the trigger phrase).
+		// Echo of a message we sent as the player: log it as history but
+		// never let it act as a trigger (even if it starts with the trigger
+		// phrase).
 		if (sentLines.remove(message)) {
-			post(sender, message, null);
+			post(sender, message, true);
 			return;
 		}
 
+		// One-way POST in every case; the middleware answers over the WS
+		// push channel. The thinking ack lands immediately for triggers.
 		boolean triggered = ChatLineParser.isTrigger(message, config.triggerPhrase());
-
-		if (!triggered) {
-			// Fire-and-forget: history ingestion only, response ignored.
-			post(sender, message, null);
-			return;
+		if (triggered) {
+			say(config.thinkingAck());
 		}
-
-		// Tagged: show the thinking ack immediately, then echo the reply.
-		say(config.thinkingAck());
-		post(sender, message, this::onReplyBody);
+		post(sender, message, triggered);
 	}
 
-	private void post(String sender, String message, Consumer<String> onBody) {
+	/**
+	 * Fires a one-way notification. The response body is never read; only
+	 * a network-level failure matters (for undelivered triggers it is the
+	 * only signal available — show failureMessage then).
+	 */
+	private void post(String sender, String message, boolean triggered) {
 		HttpRequest request = HttpRequest.newBuilder(URI.create(config.middlewareBase() + "/api/chat"))
 				.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(ChatLineParser.buildPayloadJson(sender, message)))
 				.build();
-		HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+		HTTP.sendAsync(request, HttpResponse.BodyHandlers.discarding())
 				.whenComplete((response, error) -> MinecraftClient.getInstance().execute(() -> {
 					if (error != null) {
-						MessageTriggersMod.LOGGER.error("middleware request failed: {}", error.toString());
-						if (onBody != null) {
+						MessageTriggersMod.LOGGER.error("middleware POST failed: {}", error.toString());
+						if (triggered) {
 							say(config.failureMessage());
 						}
-						return;
-					}
-					if (onBody != null) {
-						onBody.accept(response.body());
 					}
 				}));
 	}
 
-	private void onReplyBody(String body) {
-		// The middleware attaches a human-readable reply to every status
-		// (200 answer, 429 busy, 504 timeout, 502 failure) — show it verbatim.
-		String reply = ChatLineParser.extractReply(body);
-		deliver(reply != null ? reply : config.failureMessage());
-	}
-
 	/**
-	 * Delivers a bot reply: sent to the server as the player when
-	 * publicReplies is on (everyone sees it), otherwise echoed locally only.
-	 * Multi-line replies are sent as one chat message per line (chat cannot
-	 * carry newlines). The middleware's responseMaxLength (central config)
-	 * keeps each line within the server's 256-char chat limit.
+	 * Delivers a middleware message (the ONLY reply/push path): sent to the
+	 * server as the player when publicReplies is on (everyone sees it),
+	 * otherwise echoed locally only. Multi-line messages are sent as one
+	 * chat message per line (chat cannot carry newlines). The middleware's
+	 * responseMaxLength (central config) keeps each line within the
+	 * server's 256-char chat limit.
 	 *
 	 * Pushes can and do arrive before a world is joined (the title screen —
 	 * the WS channel connects at boot), so "send as player" degrades to a

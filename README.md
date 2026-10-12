@@ -5,23 +5,27 @@ localhost HTTP agent bridge. Install it on **your own client** — there is
 no server-side component; servers and other players need (and see) nothing.
 
 - Every chat line shaped `<player> message` is POSTed to `POST /api/chat`
-  (fire-and-forget for untagged lines — history ingestion).
-- Lines starting with the configured trigger phrase show a thinking ack
-  immediately, then echo the middleware's reply verbatim (200 answer, 429
-  busy, 504 timeout, 502 failure all carry a human-readable reply).
-- With `publicReplies` enabled the reply is sent to the server as the player
-  (everyone in chat sees it); otherwise it only echoes locally.
-- Feedback-loop guard: the server echo of a reply the mod sent is never
+  as a one-way notification (history ingestion — the response body is
+  never read).
+- Middleware answers travel the WebSocket push channel `GET /api/ws`
+  (connected by default): line above the configured trigger phrase →
+  thinking ack immediately, then whatever the middleware pushes (its
+  reply, busy/timeout notices, proactive pings — see the contract).
+- With `publicReplies` enabled, public pushes are sent to the server as
+  the player (everyone in chat sees it); otherwise everything only echoes
+  locally.
+- Feedback-loop guard: the server echo of a message the mod sent is never
   treated as a trigger, even if it starts with the trigger phrase.
 
 ## Middleware contract (for middleware / agent developers)
 
 If you are writing the HTTP side that this mod talks to (or wiring up a
 real agent behind it), everything you need lives in
-[`docs/middleware-contract.md`](docs/middleware-contract.md): the
-`POST /api/chat` payload shape, the `{"reply": ...}` response contract and
-its status conventions, display/feedback-loop behavior, tunables, and a
-minimal compatibility checklist. `e2e/stub-middleware.py` is a runnable
+[`docs/middleware-contract.md`](docs/middleware-contract.md): the one-way
+`POST /api/chat` payload shape, the `GET /api/ws` push-channel protocol
+(the only reply path since v2 — `{"reply": ...}` HTTP responses were
+dropped), display/feedback-loop behavior, tunables, and a minimal
+compatibility checklist. `e2e/stub-middleware.py` is a runnable
 reference implementation.
 
 ## In-game configuration
@@ -36,7 +40,7 @@ Every tunable can be changed in-game via `/mtriggers`:
 ```
 
 Keys: `middlewareBase`, `triggerPhrase`, `thinkingAck`, `failureMessage`,
-`publicReplies`, `sentMemory`.
+`publicReplies`, `sentMemory`, `wsEnabled`.
 
 Config lives at `<minecraft config dir>/messagetriggers/bridge.json`. When the
 file is missing or malformed, bundled defaults are used — the mod works out of

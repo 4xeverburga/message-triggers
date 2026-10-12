@@ -24,8 +24,8 @@ means only:
    Fabric/mixin code and may need adjusting for older targets.
 
 Scope: **message-triggers only**. The middleware is a deterministic stub
-(`stub-middleware.py`, port 32100) implementing the `/api/chat` contract;
-the MemoChat mod is NOT loaded.
+(`stub-middleware.py`, port 32100) implementing contract v2 (`/api/chat`
+one-way posts + `/api/ws` reply pushes); the MemoChat mod is NOT loaded.
 
 ## Run it
 
@@ -44,11 +44,11 @@ caches). Later runs take ~2 minutes.
 | `bridge loaded` in client log | the mod booted with the harness config |
 | `ws push channel connected` in client log | the mod connected `/api/ws` to the stub |
 | thinking ack in HUD | tagged line shows `...thinking...` immediately |
-| agent reply in HUD | stub's 200 reply is echoed into chat |
-| failure reply in HUD | stub's 502 reply is echoed into chat |
-| ws local push in HUD | the stub's `mode: local` frame appears |
-| ws public push in HUD | the stub's `mode: public` frame goes to the server and is echoed back |
-| untagged line reached middleware | fire-and-forget POST happened |
+| agent reply pushed via ws | the stub's reply arrives as a `/api/ws` frame (public mode), sent to the server AS the player and echoed into the HUD |
+| failure reply pushed via ws | the stub's failure case travels the same push path |
+| ws local push in HUD | the stub's `mode: local` connect frame appears |
+| ws public push in HUD | the stub's `mode: public` ping goes to the server and is echoed back |
+| untagged line reached middleware | one-way POST happened |
 | tagged / failure lines reached middleware | payloads carry sender + message |
 
 The driver mod (`e2edriver`) records every HUD line via a mixin on the same

@@ -5,9 +5,9 @@
 # Spawns a REAL Minecraft client (Fabric dev env via Loom's runClient) with
 # ONLY the message-triggers mod loaded, joins a local vanilla server, injects
 # scripted chat lines through the real ChatHud injection point, and asserts
-# that the bridge POSTs them to a stub middleware and echoes the replies
-# into the HUD. The driver mod writes the verdict to e2e/run/e2e-result.json
-# and stops the client itself.
+# that the bridge one-way POSTs them to a stub middleware and that replies
+# arrive via the /api/ws push channel into the HUD. The driver mod writes
+# the verdict to e2e/run/e2e-result.json and stops the client itself.
 #
 # Layout:
 #   e2e/stub-middleware.py — deterministic /api/chat stub (port 32100)

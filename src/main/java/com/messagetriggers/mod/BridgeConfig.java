@@ -38,7 +38,9 @@ public final class BridgeConfig {
 	private final int sentMemory;
 	/**
 	 * Whether to connect the WS push channel ({middlewareBase}/api/ws).
-	 * Optional in bridge.json (older configs) — absent means false.
+	 * Optional in bridge.json (older configs) — absent means TRUE: the
+	 * push channel is the only reply path (v2 contract), so it defaults
+	 * on. Setting it false disables middleware replies entirely.
 	 */
 	private final boolean wsEnabled;
 
@@ -98,7 +100,7 @@ public final class BridgeConfig {
 				requiredString(json, "failureMessage"),
 				requiredBoolean(json, "publicReplies"),
 				requiredInt(json, "sentMemory"),
-				optionalBoolean(json, "wsEnabled", false));
+				optionalBoolean(json, "wsEnabled", true));
 	}
 
 	public JsonObject toJsonObject() {
