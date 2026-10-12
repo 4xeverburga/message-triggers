@@ -42,6 +42,12 @@ The jar is written to `build/libs/`. Requires JDK 25 to run Gradle (Fabric
 Loom 1.18) and targets Java 21. The mod depends on Fabric API's client
 command module (`fabric-command-api-v2`).
 
+## Tested Minecraft versions
+
+Latest tested: **1.21.1** (e2e-verified: `e2e/run-e2e.sh` against 1.21.1).
+Other Minecraft versions live on per-version branches (`<version>`) and are
+e2e-tested there before a merge; see `e2e/README.md` for the workflow.
+
 ## E2E test
 
 `e2e/run-e2e.sh` spawns a real Minecraft 1.21.1 client with only this mod
