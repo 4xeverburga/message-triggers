@@ -5,5 +5,5 @@
   "failureMessage": "Message Triggers failed to answer.",
   "publicReplies": true,
   "sentMemory": 16,
-  "wsEnabled": false
+  "wsEnabled": true
 }

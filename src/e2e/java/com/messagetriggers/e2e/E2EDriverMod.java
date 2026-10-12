@@ -26,11 +26,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * chat line rendered in the HUD (via ChatRecorderMixin — the SAME injection
  * point the production ChatHudMixin uses, so what it sees is what the bridge
  * sees), then after joining the local vanilla server it injects scripted
- * chat lines and asserts the full round trip:
+ * chat lines and asserts the full round trip (contract v2 — all answers
+ * travel the WS push channel; the POST response body is never read):
  *
- *   untagged line  → POST /api/chat → 202 logged (stub request log)
- *   tagged line    → thinking ack in HUD → 200 reply echoed into the HUD
- *   tagged failure → 502 reply echoed into the HUD
+ *   untagged line   → one-way POST /api/chat → 202 logged (stub request log)
+ *   tagged line     → thinking ack in HUD → stub queues a reply → WS push
+ *                     (public mode) → sent to the server AS the player →
+ *                     echoed back into the HUD
+ *   tagged failure  → stub queues the failure reply → same WS push path
  *
  * The verdict is written to <gameDir>/e2e-result.json and the client stops
  * itself; e2e/run-e2e.sh reads the result and greps the client log for the
@@ -49,7 +52,8 @@ public final class E2EDriverMod implements ClientModInitializer {
 	static final String ACK = "...thinking...";
 	static final String REPLY = "E2E-REPLY-OK";
 	static final String FAILURE_REPLY = "STUB-FAILURE-REPLY";
-	// Pushed by the stub's ws server the moment the mod connects (/ws contract).
+	// Pushed by the stub's ws server: WS_LOCAL/WS_PUBLIC on connect, the
+	// replies (public mode) when the matching tagged chat POST arrives.
 	static final String WS_LOCAL = "WS-LOCAL-MSG: the middleware says hi";
 	static final String WS_PUBLIC = "WS-PUBLIC-MSG: pushed to the world";
 
@@ -189,8 +193,8 @@ public final class E2EDriverMod implements ClientModInitializer {
 	private void finish(MinecraftClient client, boolean pass, String error) {
 		List<Check> checks = new ArrayList<>();
 		check(checks, seen(ACK), "thinking ack appeared in the HUD");
-		check(checks, seen(REPLY), "agent reply echoed into the HUD");
-		check(checks, seen(FAILURE_REPLY), "failure reply echoed into the HUD");
+		check(checks, seen(REPLY), "agent reply pushed via ws and echoed into the HUD");
+		check(checks, seen(FAILURE_REPLY), "failure reply pushed via ws and echoed into the HUD");
 		check(checks, seen(WS_LOCAL), "ws local push echoed into the HUD");
 		check(checks, seen(WS_PUBLIC), "ws public push echoed into the HUD");
 		boolean middlewareOk = verify(checks);

@@ -9,14 +9,14 @@ import java.util.regex.Pattern;
 
 /**
  * Pure chat-line logic, split out of Bridge so it can be unit-tested with
- * plain JUnit (no Minecraft classes, no game window). Mirrors the
- * ChatTriggers-era contract:
+ * plain JUnit (no Minecraft classes, no game window):
  *
  *  - chat lines shaped "<player> message" are player chat; anything else
  *    (system messages, the bridge's own local echoes) is ignored
  *  - a message starting with the trigger phrase is a trigger
  *  - the middleware payload is {"sender": ..., "message": ...}
- *  - every middleware status (200/429/504/502) carries {"reply": ...}
+ *  - the middleware answers over the WS push channel, never the POST
+ *    response (v2 contract) — there is no response-body parsing here
  */
 public final class ChatLineParser {
 	/** Same parse contract as the old ChatTriggers criteria "<${name}> ${message}". */
@@ -48,25 +48,5 @@ public final class ChatLineParser {
 		payload.addProperty("sender", sender);
 		payload.addProperty("message", message);
 		return GSON.toJson(payload);
-	}
-
-	/**
-	 * Extracts the human-readable reply from a middleware response body.
-	 * Returns null when the body is not JSON or has no reply field — the
-	 * caller then shows the configured failure message.
-	 */
-	public static String extractReply(String body) {
-		if (body == null || body.isEmpty()) {
-			return null;
-		}
-		try {
-			JsonObject json = GSON.fromJson(body, JsonObject.class);
-			if (json != null && json.has("reply") && !json.get("reply").isJsonNull()) {
-				return json.get("reply").getAsString();
-			}
-			return null;
-		} catch (JsonParseException err) {
-			return null;
-		}
 	}
 }
