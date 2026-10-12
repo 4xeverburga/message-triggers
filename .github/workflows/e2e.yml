@@ -19,8 +19,10 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v4
-      - name: Install xvfb (headless display for the Minecraft client)
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install xvfb + stub deps (headless display, aiohttp for the stub)
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          python3 -m pip install aiohttp
       - name: Run the e2e harness
         working-directory: message-triggers
         run: xvfb-run -a e2e/run-e2e.sh

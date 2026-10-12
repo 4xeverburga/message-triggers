@@ -49,6 +49,9 @@ public final class E2EDriverMod implements ClientModInitializer {
 	static final String ACK = "...thinking...";
 	static final String REPLY = "E2E-REPLY-OK";
 	static final String FAILURE_REPLY = "STUB-FAILURE-REPLY";
+	// Pushed by the stub's ws server the moment the mod connects (/ws contract).
+	static final String WS_LOCAL = "WS-LOCAL-MSG: the middleware says hi";
+	static final String WS_PUBLIC = "WS-PUBLIC-MSG: pushed to the world";
 
 	private static final int SETTLE_TICKS = 100;
 	private static final int GAP_TICKS = 20;
@@ -72,8 +75,20 @@ public final class E2EDriverMod implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		ClientLifecycleEvents.CLIENT_STARTED.register(client ->
-				LOGGER.info("e2e: client started — waiting for world join"));
+		ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
+			LOGGER.info("e2e: client started — joining the harness server directly");
+			// The driver owns the join (ConnectScreen.connect, the same path
+			// the Multiplayer screen uses) instead of vanilla quickplay
+			// args: quickPlayMultiplayer silently no-ops in some dev
+			// environments, and this keeps the harness deterministic.
+			client.execute(() -> {
+				var address = net.minecraft.client.network.ServerAddress.parse("127.0.0.1:25565");
+				var server = new net.minecraft.client.network.ServerInfo(
+						"e2e", "127.0.0.1:25565", net.minecraft.client.network.ServerInfo.ServerType.OTHER);
+				net.minecraft.client.gui.screen.multiplayer.ConnectScreen.connect(
+						/* parent */ null, client, address, server, /* quickplay */ false, /* cookies */ null);
+			});
+		});
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			LOGGER.info("e2e: world joined — starting scenario");
 			phase = Phase.SETTLE;
@@ -82,7 +97,7 @@ public final class E2EDriverMod implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
 			if (phase != Phase.DONE) {
-				writeResult(false, "client stopped before the scenario finished");
+				writeResult(false, "client stopped before the scenario finished", null);
 			}
 		});
 	}
@@ -96,7 +111,7 @@ public final class E2EDriverMod implements ClientModInitializer {
 		switch (phase) {
 			case WAIT_JOIN -> {
 				if (ticksInPhase >= JOIN_TIMEOUT_TICKS) {
-					finish(client, false, "never joined a world (quickplay failed?)");
+					finish(client, false, "never joined a world (ConnectScreen.connect failed?)");
 				}
 			}
 			case SETTLE -> {
@@ -176,21 +191,33 @@ public final class E2EDriverMod implements ClientModInitializer {
 		check(checks, seen(ACK), "thinking ack appeared in the HUD");
 		check(checks, seen(REPLY), "agent reply echoed into the HUD");
 		check(checks, seen(FAILURE_REPLY), "failure reply echoed into the HUD");
+		check(checks, seen(WS_LOCAL), "ws local push echoed into the HUD");
+		check(checks, seen(WS_PUBLIC), "ws public push echoed into the HUD");
 		boolean middlewareOk = verify(checks);
 		boolean result = pass && middlewareOk;
-		writeResult(result, error);
+		writeResult(result, error, checks);
 		LOGGER.info("e2e: scenario finished — {}", result ? "PASS" : "FAIL: " + error);
 		phase = Phase.DONE;
 		client.scheduleStop();
 	}
 
-	private void writeResult(boolean pass, String error) {
+	private void writeResult(boolean pass, String error, List<Check> checks) {
 		JsonObject result = new JsonObject();
 		result.addProperty("pass", pass);
 		if (error != null) {
 			result.addProperty("error", error);
 		}
 		result.addProperty("hudLineCount", hudLines.size());
+		if (checks != null) {
+			com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+			for (Check c : checks) {
+				JsonObject entry = new JsonObject();
+				entry.addProperty("name", c.name());
+				entry.addProperty("pass", c.pass());
+				array.add(entry);
+			}
+			result.add("checks", array);
+		}
 		try {
 			Path file = FabricLoader.getInstance().getGameDir().resolve("e2e-result.json");
 			Files.writeString(file, GSON.toJson(result), StandardCharsets.UTF_8);

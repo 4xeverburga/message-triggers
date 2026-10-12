@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 
 	private static Bridge bridge;
 	private static Path configPath;
+	private static WsChannel wsChannel;
 
 	@Override
 	public void onInitializeClient() {
@@ -39,6 +41,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 			LOGGER.info("bridge.json not found at {} — using bundled defaults (change in-game via /mtriggers)", configPath);
 		}
 		LOGGER.info("bridge loaded: {} (trigger {})", bridge.middlewareBase(), bridge.triggerPhrase());
+		reconnectWsChannel(bridge.config());
 		registerCommands();
 	}
 
@@ -71,9 +74,45 @@ public final class MessageTriggersMod implements ClientModInitializer {
 			}
 			bridge = Bridge.fromConfig(result.config());
 			LOGGER.info("config updated via /mtriggers: {}", result.feedback().replace('\n', ';'));
+			reconnectWsChannel(result.config());
 		}
 		source.sendFeedback(Text.literal(result.feedback()));
 		return result.success() ? 1 : 0;
+	}
+
+	/**
+	 * Stops the current push channel (if any) and starts a new one when the
+	 * config says so — middlewareBase and wsEnabled both take effect at
+	 * set-time without a restart.
+	 */
+	private static void reconnectWsChannel(BridgeConfig config) {
+		if (wsChannel != null) {
+			wsChannel.stop();
+			wsChannel = null;
+		}
+		if (!config.wsEnabled()) {
+			LOGGER.info("ws push channel disabled (enable via /mtriggers set wsEnabled true)");
+			return;
+		}
+		wsChannel = new WsChannel(config.middlewareBase(), LOGGER, MessageTriggersMod::onPush);
+		wsChannel.start();
+	}
+
+	/**
+	 * Push sink for the ws channel (called on the WS thread): hops onto the
+	 * client thread and routes to the current bridge.
+	 */
+	public static void onPush(String text, boolean isPublic) {
+		MinecraftClient.getInstance().execute(() -> {
+			if (bridge == null) {
+				return;
+			}
+			if (isPublic) {
+				bridge.pushPublic(text);
+			} else {
+				bridge.pushLocal(text);
+			}
+		});
 	}
 
 	/** Called by the chat mixin for every chat line rendered in the HUD. */
