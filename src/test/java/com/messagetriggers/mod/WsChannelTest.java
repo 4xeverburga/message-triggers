@@ -8,14 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Contract tests for the push channel's pure logic (no sockets, no Minecraft):
+ * Contract tests for the WS channel's pure logic (no sockets, no Minecraft):
  *
  * URI derivation: {middlewareBase} → its ws[s] form + /api/ws
- * (same origin the bridge POSTs to — one host, one trust decision).
+ * (one origin, one trust decision — contract v3 has NO other endpoint).
  *
  * Frame parsing: {"text": "...", "mode": "local"|"public"} — mode optional,
  * default local. Anything malformed, ambiguous or empty is DROPPED (null),
  * never partially displayed.
+ *
+ * Outbound frame building: {"type": "chat", "sender", "message"}.
  */
 class WsChannelTest {
 	// ── wsUri ──────────────────────────────────────────────────────────────
@@ -72,5 +74,20 @@ class WsChannelTest {
 		assertNull(WsChannel.parse("{\"text\": \"   \"}"));
 		assertNull(WsChannel.parse("[\"text\"]"));
 		assertNull(WsChannel.parse("123"));
+	}
+
+	// ── buildChatFrame ─────────────────────────────────────────────────────
+
+	@Test
+	void buildsTypedChatFrames() {
+		assertEquals("{\"type\":\"chat\",\"sender\":\"4verburg\",\"message\":\"@bot hello\"}",
+				WsChannel.buildChatFrame("4verburg", "@bot hello"));
+	}
+
+	@Test
+	void chatFrameEscapingSurvivesRoundTrip() {
+		// Quotes, backslashes and newlines must survive the JSON encoding.
+		String frame = WsChannel.buildChatFrame("alice", "say \"hi\" \\ o/\nnice");
+		assertEquals("{\"type\":\"chat\",\"sender\":\"alice\",\"message\":\"say \\\"hi\\\" \\\\ o/\\nnice\"}", frame);
 	}
 }

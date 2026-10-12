@@ -65,13 +65,6 @@ class ConfigCommandTest {
 	}
 
 	@Test
-	void setValueMayContainSpaces() {
-		ConfigCommand.Result result = ConfigCommand.handle("set failureMessage oops, one moment", sampleConfig(), configPath);
-		assertTrue(result.success());
-		assertEquals("oops, one moment", result.config().failureMessage());
-	}
-
-	@Test
 	void setTriggerPhraseMayContainSpaces() {
 		ConfigCommand.Result result = ConfigCommand.handle("set triggerPhrase @hey there", sampleConfig(), configPath);
 		assertTrue(result.success());

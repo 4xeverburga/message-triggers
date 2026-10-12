@@ -32,33 +32,23 @@ public final class BridgeConfig {
 	private final String middlewareBase;
 	private final String triggerPhrase;
 	private final String thinkingAck;
-	private final String failureMessage;
 	private final boolean publicReplies;
 	/** How many recently sent reply lines to remember for the echo guard. */
 	private final int sentMemory;
-	/**
-	 * Whether to connect the WS push channel ({middlewareBase}/api/ws).
-	 * Optional in bridge.json (older configs) — absent means TRUE: the
-	 * push channel is the only reply path (v2 contract), so it defaults
-	 * on. Setting it false disables middleware replies entirely.
-	 */
-	private final boolean wsEnabled;
 
 	private BridgeConfig(String middlewareBase, String triggerPhrase, String thinkingAck,
-			String failureMessage, boolean publicReplies, int sentMemory, boolean wsEnabled) {
+			boolean publicReplies, int sentMemory) {
 		this.middlewareBase = middlewareBase;
 		this.triggerPhrase = triggerPhrase;
 		this.thinkingAck = thinkingAck;
-		this.failureMessage = failureMessage;
 		this.publicReplies = publicReplies;
 		this.sentMemory = sentMemory;
-		this.wsEnabled = wsEnabled;
 	}
 
 	/** Every tunable, in display order (used by /mtriggers show and tests). */
 	public static List<String> keys() {
 		return List.of("middlewareBase", "triggerPhrase", "thinkingAck",
-				"failureMessage", "publicReplies", "sentMemory", "wsEnabled");
+				"publicReplies", "sentMemory");
 	}
 
 	/**
@@ -97,10 +87,8 @@ public final class BridgeConfig {
 				requiredString(json, "middlewareBase"),
 				requiredString(json, "triggerPhrase"),
 				requiredString(json, "thinkingAck"),
-				requiredString(json, "failureMessage"),
 				requiredBoolean(json, "publicReplies"),
-				requiredInt(json, "sentMemory"),
-				optionalBoolean(json, "wsEnabled", true));
+				requiredInt(json, "sentMemory"));
 	}
 
 	public JsonObject toJsonObject() {
@@ -108,10 +96,8 @@ public final class BridgeConfig {
 		json.addProperty("middlewareBase", middlewareBase);
 		json.addProperty("triggerPhrase", triggerPhrase);
 		json.addProperty("thinkingAck", thinkingAck);
-		json.addProperty("failureMessage", failureMessage);
 		json.addProperty("publicReplies", publicReplies);
 		json.addProperty("sentMemory", sentMemory);
-		json.addProperty("wsEnabled", wsEnabled);
 		return json;
 	}
 
@@ -134,43 +120,35 @@ public final class BridgeConfig {
 						|| !(uri.getScheme().equals("http") || uri.getScheme().equals("https"))) {
 					throw new IllegalArgumentException("middlewareBase must be an http(s) URL");
 				}
-				return replace(value, triggerPhrase, thinkingAck, failureMessage, publicReplies, sentMemory, wsEnabled);
+				return replace(value, triggerPhrase, thinkingAck, publicReplies, sentMemory);
 			}
 			case "triggerPhrase" -> {
 				requireNonEmpty(key, value);
-				return replace(middlewareBase, value, thinkingAck, failureMessage, publicReplies, sentMemory, wsEnabled);
+				return replace(middlewareBase, value, thinkingAck, publicReplies, sentMemory);
 			}
 			case "thinkingAck" -> {
 				requireNonEmpty(key, value);
-				return replace(middlewareBase, triggerPhrase, value, failureMessage, publicReplies, sentMemory, wsEnabled);
-			}
-			case "failureMessage" -> {
-				requireNonEmpty(key, value);
-				return replace(middlewareBase, triggerPhrase, thinkingAck, value, publicReplies, sentMemory, wsEnabled);
+				return replace(middlewareBase, triggerPhrase, value, publicReplies, sentMemory);
 			}
 			case "publicReplies" -> {
 				boolean parsed = parseBoolean(key, value);
-				return replace(middlewareBase, triggerPhrase, thinkingAck, failureMessage, parsed, sentMemory, wsEnabled);
+				return replace(middlewareBase, triggerPhrase, thinkingAck, parsed, sentMemory);
 			}
 			case "sentMemory" -> {
 				int parsed = parseInt(key, value);
 				if (parsed < 1) {
 					throw new IllegalArgumentException("sentMemory must be >= 1");
 				}
-				return replace(middlewareBase, triggerPhrase, thinkingAck, failureMessage, publicReplies, parsed, wsEnabled);
-			}
-			case "wsEnabled" -> {
-				boolean parsed = parseBoolean(key, value);
-				return replace(middlewareBase, triggerPhrase, thinkingAck, failureMessage, publicReplies, sentMemory, parsed);
+				return replace(middlewareBase, triggerPhrase, thinkingAck, publicReplies, parsed);
 			}
 			default -> throw new IllegalArgumentException("unknown key: " + key);
 		}
 	}
 
 	private BridgeConfig replace(String middlewareBase, String triggerPhrase, String thinkingAck,
-			String failureMessage, boolean publicReplies, int sentMemory, boolean wsEnabled) {
+			boolean publicReplies, int sentMemory) {
 		return new BridgeConfig(middlewareBase, triggerPhrase, thinkingAck,
-				failureMessage, publicReplies, sentMemory, wsEnabled);
+				publicReplies, sentMemory);
 	}
 
 	public String middlewareBase() {
@@ -185,20 +163,12 @@ public final class BridgeConfig {
 		return thinkingAck;
 	}
 
-	public String failureMessage() {
-		return failureMessage;
-	}
-
 	public boolean publicReplies() {
 		return publicReplies;
 	}
 
 	public int sentMemory() {
 		return sentMemory;
-	}
-
-	public boolean wsEnabled() {
-		return wsEnabled;
 	}
 
 	private static String readOrNull(Path path) {
@@ -239,14 +209,6 @@ public final class BridgeConfig {
 			throw new JsonParseException("config is missing required key: " + key);
 		}
 		return json.get(key).getAsInt();
-	}
-
-	/** Keys added after v0.1.0 are optional with a default, for old configs. */
-	private static boolean optionalBoolean(JsonObject json, String key, boolean fallback) {
-		if (json == null || !json.has(key) || json.get(key).isJsonNull()) {
-			return fallback;
-		}
-		return json.get(key).getAsBoolean();
 	}
 
 	private static void requireNonEmpty(String key, String value) {

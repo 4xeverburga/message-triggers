@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """Deterministic middleware stub for the message-triggers e2e harness.
 
-Implements contract v2 (docs/middleware-contract.md) served by aiohttp on
-ONE port (same-origin, like a real middleware):
+Implements contract v3 (docs/middleware-contract.md) — ONE surface, the
+WebSocket, served by aiohttp on ONE port (same-origin, like a real
+middleware). There is NO /api/chat: the mod forwards nothing over HTTP.
 
-  POST /api/chat: one-way notification — every payload is logged and
-    answered with a fast 202 {"status": "logged"}; the body is never read
-    by the mod, so nothing replies over the POST response.
-  GET /api/ws: WebSocket push channel — THE answer surface. A tagged
-    trigger (@bot ...) queues a reply ({"failme" in the message queues
-    STUB-FAILURE-REPLY to exercise the failure case); the WS loop drains
-    the queue by pushing {"text": reply, "mode": "public"} frames, which
-    the mod then sends to the server AS the player (publicReplies=true in
-    the harness config). On connect the stub also pushes one local-mode
-    frame immediately (lands before a world is joined — exercises the
-    mod's not-in-a-world fallback), then repeats a public-mode ping every
-    5s (exercises the sent-to-server path and its echo back as chat POSTs).
-
-Every received HTTP payload is appended (JSONL) to the file given as
-argv[2] so the driver mod can assert the bridge actually sent the right lines.
+  GET /api/ws — bidirectional:
+    client→server frames: {"type": "chat", "sender", "message"} — every
+      chat line the client renders is appended (JSONL) to the file given
+      as argv[2] so the driver mod can assert the bridge actually sent
+      the right lines.
+    server→client frames: replies/pushes. A tagged message (@bot ...)
+      queues a reply ({"failme" in the message queues STUB-FAILURE-REPLY
+      to exercise the failure case); the loop drains the queue as
+      {"text": reply, "mode": "public"} frames, which the mod then sends
+      to the server AS the player (publicReplies=true in the harness
+      config). On connect the stub pushes one local-mode frame
+      immediately (lands before a world is joined — exercises the mod's
+      not-in-a-world fallback), then repeats a public-mode ping every 1s
+      tick (exercises the sent-to-server path and its echo back as chat
+      frames — the feedback loop).
 
 Requires aiohttp (pip install aiohttp).
 Usage: stub-middleware.py [port] [request-log-path]
@@ -37,29 +38,10 @@ FAILURE_REPLY = "STUB-FAILURE-REPLY"
 WS_LOCAL = "WS-LOCAL-MSG: the middleware says hi"
 WS_PUBLIC = "WS-PUBLIC-MSG: pushed to the world"
 
-# Replies owed: appended by the chat POST handler, drained by the WS loop.
-# Contract v2 says pushes are fire-and-forget from the middleware's side —
-# the queue models a middleware that answers every trigger it saw.
+# Replies owed: queued on inbound chat frames, drained by the WS loop.
+# Contract v3 says the transport is fire-and-forget, the middleware owns
+# queue-and-discipline — the queue models exactly that.
 pending_replies: list[str] = []
-
-
-async def chat(request: web.Request) -> web.Response:
-    body = await request.text()
-    try:
-        payload = json.loads(body)
-    except Exception:
-        payload = {}
-    sender = str(payload.get("sender", ""))
-    message = str(payload.get("message", ""))
-    with open(REQUEST_LOG, "a") as log:
-        log.write(json.dumps({
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "sender": sender,
-            "message": message,
-        }) + "\n")
-    if message.startswith(TRIGGER):
-        pending_replies.append(FAILURE_REPLY if "failme" in message else REPLY)
-    return web.json_response({"status": "logged"}, status=202)
 
 
 async def ws(request: web.Request) -> web.WebSocketResponse:
@@ -70,10 +52,16 @@ async def ws(request: web.Request) -> web.WebSocketResponse:
     # a joined world (exercise the public path: sent to the server AS the
     # player and echoed back by the server).
     await sock.send_json({"text": WS_LOCAL, "mode": "local"})
+    # One loop, two duties: handle inbound chat frames as they arrive, and
+    # every tick drain the reply queue + repeat the public ping (drives
+    # both the reply path and the feedback-loop echo frames).
     while True:
         try:
-            await asyncio.wait_for(sock.receive(), timeout=1.0)
-            if sock.closed:
+            msg = await asyncio.wait_for(sock.receive(), timeout=1.0)
+            if msg.type == web.WSMsgType.TEXT:
+                handle_chat_frame(msg.data)
+            elif msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.CLOSING,
+                              web.WSMsgType.CLOSED, web.WSMsgType.ERROR):
                 break
         except asyncio.TimeoutError:
             while pending_replies:
@@ -84,7 +72,24 @@ async def ws(request: web.Request) -> web.WebSocketResponse:
     return sock
 
 
+def handle_chat_frame(raw: str) -> None:
+    global pending_replies
+    try:
+        frame = json.loads(raw)
+    except Exception:
+        return
+    sender = str(frame.get("sender", ""))
+    message = str(frame.get("message", ""))
+    with open(REQUEST_LOG, "a") as log:
+        log.write(json.dumps({
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "sender": sender,
+            "message": message,
+        }) + "\n")
+    if message.startswith(TRIGGER):
+        pending_replies.append(FAILURE_REPLY if "failme" in message else REPLY)
+
+
 app = web.Application()
-app.router.add_post("/api/chat", chat)
 app.router.add_get("/api/ws", ws)
 web.run_app(app, host="127.0.0.1", port=PORT, print=None)

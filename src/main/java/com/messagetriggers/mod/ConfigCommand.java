@@ -80,10 +80,8 @@ public final class ConfigCommand {
 			case "middlewareBase" -> config.middlewareBase();
 			case "triggerPhrase" -> config.triggerPhrase();
 			case "thinkingAck" -> config.thinkingAck();
-			case "failureMessage" -> config.failureMessage();
 			case "publicReplies" -> Boolean.toString(config.publicReplies());
 			case "sentMemory" -> Integer.toString(config.sentMemory());
-			case "wsEnabled" -> Boolean.toString(config.wsEnabled());
 			default -> throw new IllegalArgumentException("unknown key: " + key);
 		};
 	}

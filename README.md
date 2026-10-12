@@ -4,13 +4,14 @@ A Fabric client mod for Minecraft 1.21.1 that bridges in-game chat to a
 localhost HTTP agent bridge. Install it on **your own client** — there is
 no server-side component; servers and other players need (and see) nothing.
 
-- Every chat line shaped `<player> message` is POSTed to `POST /api/chat`
-  as a one-way notification (history ingestion — the response body is
-  never read).
-- Middleware answers travel the WebSocket push channel `GET /api/ws`
-  (connected by default): line above the configured trigger phrase →
-  thinking ack immediately, then whatever the middleware pushes (its
-  reply, busy/timeout notices, proactive pings — see the contract).
+- ONE channel, a `GET /api/ws` WebSocket to the middleware host — no HTTP
+  at all. Every chat line shaped `<player> message` is forwarded over it
+  as a `{"type": "chat"}` frame (fire-and-forget; dropped while
+  disconnected).
+- Messages the middleware pushes on the same socket are displayed: line
+  above the configured trigger phrase → thinking ack immediately, then
+  whatever comes back (its reply, busy/timeout notices, proactive pings
+  — see the contract).
 - With `publicReplies` enabled, public pushes are sent to the server as
   the player (everyone in chat sees it); otherwise everything only echoes
   locally.
@@ -21,12 +22,11 @@ no server-side component; servers and other players need (and see) nothing.
 
 If you are writing the HTTP side that this mod talks to (or wiring up a
 real agent behind it), everything you need lives in
-[`docs/middleware-contract.md`](docs/middleware-contract.md): the one-way
-`POST /api/chat` payload shape, the `GET /api/ws` push-channel protocol
-(the only reply path since v2 — `{"reply": ...}` HTTP responses were
-dropped), display/feedback-loop behavior, tunables, and a minimal
-compatibility checklist. `e2e/stub-middleware.py` is a runnable
-reference implementation.
+[`docs/middleware-contract.md`](docs/middleware-contract.md): the single
+bidirectional `GET /api/ws` channel (chat frames in, push frames out —
+the whole contract since v3, when `POST /api/chat` was deleted),
+display/feedback-loop behavior, tunables, and a minimal compatibility
+checklist. `e2e/stub-middleware.py` is a runnable reference implementation.
 
 ## In-game configuration
 
@@ -39,8 +39,8 @@ Every tunable can be changed in-game via `/mtriggers`:
 /mtriggers path                     show where bridge.json lives
 ```
 
-Keys: `middlewareBase`, `triggerPhrase`, `thinkingAck`, `failureMessage`,
-`publicReplies`, `sentMemory`, `wsEnabled`.
+Keys: `middlewareBase`, `triggerPhrase`, `thinkingAck`, `publicReplies`,
+`sentMemory`.
 
 Config lives at `<minecraft config dir>/messagetriggers/bridge.json`. When the
 file is missing or malformed, bundled defaults are used — the mod works out of

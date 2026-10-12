@@ -1,35 +1,28 @@
 package com.messagetriggers.mod;
 
-import com.google.gson.Gson;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 
 /**
- * The chat → middleware bridge (contract v2):
+ * The chat ⇄ middleware bridge (contract v3): ONE channel, the WebSocket.
  *
- *  - Every chat line shaped "<player> message" is POSTed to /api/chat as a
- *    ONE-WAY notification (history ingestion). The response body is never
- *    read — nothing replies over the POST response (that was the v1
- *    contract, removed).
- *  - ALL middleware→player messages travel the WS push channel
- *    (WsChannel → pushLocal/pushPublic): trigger replies, busy/timeout
- *    notices, proactive pings.
- *  - The thinking ack is shown the moment a trigger is typed (transient
- *    local noise). If the POST itself fails at the network level, the
- *    trigger never reached the middleware — failureMessage is shown then.
- *    A slow agent is the middleware's problem: it should push a notice.
- *  - Message display rules (local echo vs send-to-server-as-player) live
- *    in deliver() and apply to every push.
+ *  - Every chat line shaped "<player> message" is forwarded to the
+ *    middleware as a {"type": "chat"} frame on the WS (WsChannel.sendChat),
+ *    fire-and-forget: when the socket is down the line is dropped — the
+ *    middleware's queue-and-discipline problem, mirror side of the pushes.
+ *    There is no HTTP anywhere in this mod.
+ *  - Messages that come back (WS frames, any time) are displayed by
+ *    deliver(): sent to the server as the player when publicReplies is on,
+ *    local echo otherwise.
+ *  - The thinking ack is purely client-side decoration: a line starting
+ *    with the trigger phrase shows it the moment it is typed. It is the
+ *    middleware's decision (from the forwarded lines) what to answer.
  *  - Feedback loop guard: the server echo of a message we sent comes back
  *    shaped "<player> message" like any other chat. Those echoes are still
- *    POSTed (so replies enter the chat history) but are never treated as
+ *    forwarded (so replies enter the history) but are never treated as
  *    triggers, even if the text happens to start with the trigger phrase.
  *
  * All tunables come from bridge.json via BridgeConfig (bundled defaults are
@@ -37,26 +30,30 @@ import java.util.ArrayDeque;
  * in-game via /mtriggers; MessageTriggersMod swaps in the updated bridge.
  */
 public final class Bridge {
-	private static final Gson GSON = new Gson();
-	private static final HttpClient HTTP = HttpClient.newHttpClient();
+	/** Carrier for chat lines to the middleware (the WS channel). */
+	public interface Outbox {
+		void sendChat(String sender, String message);
+	}
 
 	private final BridgeConfig config;
+	private final Outbox outbox;
 	/** Lines we sent as the player; their echoes must never re-trigger. */
 	private final ArrayDeque<String> sentLines = new ArrayDeque<>();
 
-	private Bridge(BridgeConfig config) {
+	private Bridge(BridgeConfig config, Outbox outbox) {
 		this.config = config;
+		this.outbox = outbox;
 	}
 
 	/** Loads bridge.json (bundled defaults when the file is missing). */
-	public static Bridge load(Path configPath) {
+	public static Bridge load(Path configPath, Outbox outbox) {
 		BridgeConfig config = BridgeConfig.load(configPath);
-		return config == null ? null : new Bridge(config);
+		return config == null ? null : new Bridge(config, outbox);
 	}
 
 	/** Wraps an already-loaded config (used when /mtriggers applies changes). */
-	public static Bridge fromConfig(BridgeConfig config) {
-		return new Bridge(config);
+	public static Bridge fromConfig(BridgeConfig config, Outbox outbox) {
+		return new Bridge(config, outbox);
 	}
 
 	public BridgeConfig config() {
@@ -80,9 +77,9 @@ public final class Bridge {
 	}
 
 	/**
-	 * Middleware push (WS channel, public mode): same display rules as a
-	 * trigger reply — sent to the server as the player when publicReplies is
-	 * on, locally echoed otherwise (the player has final say over whether
+	 * Middleware push (WS channel, public mode): same display rules as any
+	 * reply — sent to the server as the player when publicReplies is on,
+	 * locally echoed otherwise (the player has final say over whether
 	 * anything leaves their machine).
 	 */
 	public void pushPublic(String text) {
@@ -97,51 +94,22 @@ public final class Bridge {
 		String sender = parsed[0];
 		String message = parsed[1];
 
-		// Echo of a message we sent as the player: log it as history but
+		// Echo of a message we sent as the player: forward it as history but
 		// never let it act as a trigger (even if it starts with the trigger
 		// phrase).
-		if (sentLines.remove(message)) {
-			post(sender, message, true);
-			return;
-		}
-
-		// One-way POST in every case; the middleware answers over the WS
-		// push channel. The thinking ack lands immediately for triggers.
-		boolean triggered = ChatLineParser.isTrigger(message, config.triggerPhrase());
-		if (triggered) {
+		boolean echo = sentLines.remove(message);
+		if (!echo && ChatLineParser.isTrigger(message, config.triggerPhrase())) {
 			say(config.thinkingAck());
 		}
-		post(sender, message, triggered);
+		outbox.sendChat(sender, message);
 	}
 
 	/**
-	 * Fires a one-way notification. The response body is never read; only
-	 * a network-level failure matters (for undelivered triggers it is the
-	 * only signal available — show failureMessage then).
-	 */
-	private void post(String sender, String message, boolean triggered) {
-		HttpRequest request = HttpRequest.newBuilder(URI.create(config.middlewareBase() + "/api/chat"))
-				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(ChatLineParser.buildPayloadJson(sender, message)))
-				.build();
-		HTTP.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-				.whenComplete((response, error) -> MinecraftClient.getInstance().execute(() -> {
-					if (error != null) {
-						MessageTriggersMod.LOGGER.error("middleware POST failed: {}", error.toString());
-						if (triggered) {
-							say(config.failureMessage());
-						}
-					}
-				}));
-	}
-
-	/**
-	 * Delivers a middleware message (the ONLY reply/push path): sent to the
-	 * server as the player when publicReplies is on (everyone sees it),
-	 * otherwise echoed locally only. Multi-line messages are sent as one
-	 * chat message per line (chat cannot carry newlines). The middleware's
-	 * responseMaxLength (central config) keeps each line within the
-	 * server's 256-char chat limit.
+	 * Delivers a middleware message: sent to the server as the player when
+	 * publicReplies is on (everyone sees it), otherwise echoed locally only.
+	 * Multi-line messages are sent as one chat message per line (chat cannot
+	 * carry newlines). The middleware's responseMaxLength (central config)
+	 * keeps each line within the server's 256-char chat limit.
 	 *
 	 * Pushes can and do arrive before a world is joined (the title screen —
 	 * the WS channel connects at boot), so "send as player" degrades to a
@@ -153,7 +121,7 @@ public final class Bridge {
 		if (!config.publicReplies() || !inWorld) {
 			if (config.publicReplies() && !inWorld) {
 				MessageTriggersMod.LOGGER.warn(
-						"public reply arrived before a world was joined — echoing locally instead");
+						"public push arrived before a world was joined — echoing locally instead");
 			}
 			say(text);
 			return;
