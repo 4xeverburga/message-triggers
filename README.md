@@ -1,7 +1,8 @@
 # Message Triggers
 
 A Fabric client mod for Minecraft 1.21.1 that bridges in-game chat to a
-localhost HTTP agent bridge.
+localhost HTTP agent bridge. Install it on **your own client** — there is
+no server-side component; servers and other players need (and see) nothing.
 
 - Every chat line shaped `<player> message` is POSTed to `POST /api/chat`
   (fire-and-forget for untagged lines — history ingestion).
