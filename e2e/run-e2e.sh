@@ -33,6 +33,7 @@ if [ -z "$MC_VERSION" ]; then
 	exit 1
 fi
 STUB_PORT=32100
+SERVER_PORT=25565
 CLIENT_TIMEOUT_SECS=900
 SERVER_TIMEOUT_SECS=180
 
@@ -58,7 +59,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── 1. run dir + bridge config (publicReplies=false → local echo only) ────
+# A previous crashed/killed run leaves orphan processes (holding ports and
+# the world lock) or, worse, leaves us probing THEIR socket and grepping
+# THEIR log and concluding everything is healthy. Kill our leftovers first;
+# if the ports are still busy (something ELSE is bound), abort loudly.
+if command -v fuser >/dev/null 2>&1; then
+	fuser -k ${STUB_PORT}/tcp ${SERVER_PORT}/tcp >/dev/null 2>&1 || true
+	sleep 1
+fi
+for port in "$STUB_PORT" "$SERVER_PORT"; do
+	if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+		exec 3>&- 3<&- || true
+		echo "[e2e] ERROR: port $port is already in use by an unknown process" \
+			"— free it and re-run (hint: fuser -k $port/tcp)"
+		exit 1
+	fi
+done
+
+# ── 0. harness requirements: aiohttp (stub = HTTP POST + WS push) ─────────
+if ! python3 -c "import aiohttp" 2>/dev/null; then
+	echo "[e2e] ERROR: the stub needs aiohttp — install it with: python3 -m pip install aiohttp"
+	exit 1
+fi
+
+# ── 1. run dir + bridge config (publicReplies=true so the harness exercises
+#       the real public path: replies and ws public pushes go to the server
+#       and come back as the player's chat) ─────────────────────────────────
 mkdir -p "$RUN_DIR/config/messagetriggers"
 rm -f "$RUN_DIR/e2e-result.json" "$RUN_DIR/stub-requests.jsonl"
 cat > "$RUN_DIR/config/messagetriggers/bridge.json" <<EOF
@@ -67,8 +93,9 @@ cat > "$RUN_DIR/config/messagetriggers/bridge.json" <<EOF
   "triggerPhrase": "@bot",
   "thinkingAck": "...thinking...",
   "failureMessage": "Message Triggers failed to answer.",
-  "publicReplies": false,
-  "sentMemory": 16
+  "publicReplies": true,
+  "sentMemory": 16,
+  "wsEnabled": true
 }
 EOF
 
@@ -97,6 +124,9 @@ spawn-protection=0
 sync-chunk-writes=false
 white-list=false
 EOF
+# Fresh boot evidence only: reject any pre-existing log ("Done (" could be a
+# leftover from a previous run) and a stale world lock from a killed run.
+rm -f "$SERVER_DIR/logs/latest.log" "$SERVER_DIR/world/session.lock"
 
 # ── 3. stub middleware ────────────────────────────────────────────────────
 python3 "$E2E_DIR/stub-middleware.py" "$STUB_PORT" "$RUN_DIR/stub-requests.jsonl" &

@@ -72,6 +72,24 @@ public final class Bridge {
 		return config.triggerPhrase();
 	}
 
+	/**
+	 * Middleware push (WS channel, local mode): echo into the local HUD only.
+	 * publicReplies does not apply — the middleware picked the mode explicitly.
+	 */
+	public void pushLocal(String text) {
+		say(text);
+	}
+
+	/**
+	 * Middleware push (WS channel, public mode): same display rules as a
+	 * trigger reply — sent to the server as the player when publicReplies is
+	 * on, locally echoed otherwise (the player has final say over whether
+	 * anything leaves their machine).
+	 */
+	public void pushPublic(String text) {
+		deliver(text);
+	}
+
 	public void onChatMessage(String rawText) {
 		String[] parsed = ChatLineParser.parse(rawText);
 		if (parsed == null) {
@@ -133,9 +151,19 @@ public final class Bridge {
 	 * Multi-line replies are sent as one chat message per line (chat cannot
 	 * carry newlines). The middleware's responseMaxLength (central config)
 	 * keeps each line within the server's 256-char chat limit.
+	 *
+	 * Pushes can and do arrive before a world is joined (the title screen —
+	 * the WS channel connects at boot), so "send as player" degrades to a
+	 * local echo there: it must never crash the game or lose the message.
 	 */
 	private void deliver(String text) {
-		if (!config.publicReplies()) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		boolean inWorld = client.player != null;
+		if (!config.publicReplies() || !inWorld) {
+			if (config.publicReplies() && !inWorld) {
+				MessageTriggersMod.LOGGER.warn(
+						"public reply arrived before a world was joined — echoing locally instead");
+			}
 			say(text);
 			return;
 		}
@@ -143,7 +171,7 @@ public final class Bridge {
 			if (line.isEmpty()) {
 				continue;
 			}
-			MinecraftClient.getInstance().player.networkHandler.sendChatMessage(line);
+			client.player.networkHandler.sendChatMessage(line);
 			sentLines.addLast(line);
 			while (sentLines.size() > config.sentMemory()) {
 				sentLines.removeFirst();

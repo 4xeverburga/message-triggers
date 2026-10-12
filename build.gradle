@@ -29,9 +29,10 @@ loom {
 			source = sourceSets.e2e
 			// Keep the game dir inside e2e/ so run-e2e.sh's paths are stable.
 			runDir 'e2e/run'
-			// Auto-join the local vanilla server the harness script starts,
-			// with a fixed username (the harness asserts against it).
-			programArgs '--quickPlayMultiplayer', '127.0.0.1:25565', '--username', 'E2ETester'
+			// Fixed username (the harness asserts against it); the driver mod
+			// itself initiates the join via ConnectScreen.connect, so no
+			// quickplay args (they silently no-op in dev environments).
+			programArgs '--username', 'E2ETester'
 		}
 	}
 }

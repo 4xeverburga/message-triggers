@@ -42,9 +42,12 @@ caches). Later runs take ~2 minutes.
 | Check | Meaning |
 |---|---|
 | `bridge loaded` in client log | the mod booted with the harness config |
+| `ws push channel connected` in client log | the mod connected `/api/ws` to the stub |
 | thinking ack in HUD | tagged line shows `...thinking...` immediately |
 | agent reply in HUD | stub's 200 reply is echoed into chat |
 | failure reply in HUD | stub's 502 reply is echoed into chat |
+| ws local push in HUD | the stub's `mode: local` frame appears |
+| ws public push in HUD | the stub's `mode: public` frame goes to the server and is echoed back |
 | untagged line reached middleware | fire-and-forget POST happened |
 | tagged / failure lines reached middleware | payloads carry sender + message |
 

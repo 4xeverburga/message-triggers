@@ -157,8 +157,51 @@ you can rely on:
 | `failureMessage` | `Message Triggers failed to answer.` | What the player sees when your service errors or returns a bad body |
 | `publicReplies`  | `true`                               | Whether your replies go to the server (see §2) |
 | `sentMemory`     | `16`                                 | Size of the echo-guard buffer (see §3) |
+| `wsEnabled`      | `false`                              | Whether the mod connects the push channel (§6) |
 
-## 6. Testing your middleware against the mod
+## 6. Push channel (optional): `GET {middlewareBase}/api/ws` — WebSocket
+
+The POST/response loop above ties every inbound game message to a reply the
+HTTP side returns. For anything **unprompted** (proactive agent messages,
+scheduled reminders, webhooks invocations from other systems), the mod can
+maintain a **WebSocket push channel** — same origin as `middlewareBase`
+(`http→ws`, `https→wss`), path `/api/ws`.
+
+### Protocol rules
+
+- The mod connects and **listens only** — it sends nothing in v1, and it
+  reconnects **indefinitely with backoff** on disconnects/errors, so it is
+  safe to serve nothing to it.
+- Frames: one JSON object per **text frame**:
+
+  ```json
+  {"text": "the agent needs your attention", "mode": "local"}
+  ```
+
+  | Field  | Type   | Notes                                                                      |
+  |--------|--------|----------------------------------------------------------------------------|
+  | `text` | string | The message to display; blank text frames are silently dropped             |
+  | `mode` | string | `local` (default) → shown only to the player; `public` → posted to the server as the player. **Anything else drops the frame** — the mode names are exact and case-sensitive |
+
+  Unknown JSON fields are ignored for forward compatibility.
+- The mod **must not be trusted with reliability**: the transport is
+  fire-and-forget from your side. If your middleware restarts or the player
+  alt-tabs through a network flap, queue-and-discipline your messages
+  there; the reconnecting client means you do NOT need to gate app
+  behavior on push delivery.
+- publicReplies applies: a `public` push still lands locally if the player
+  disabled public replies, and it obeys the 256-char-per-line rule (§2).
+- The reach of "pushed" texts is the game-limit: the server will re-echo
+  them back to you as ordinary chat POSTs (they enter your history).
+
+### Enabling
+
+`/mtriggers set wsEnabled true` (or `"wsEnabled": true` in bridge.json).
+Default is `false` — middleware implementations should treat the socket as
+additive, never as the only way to reach the player: a chat-triggered
+`{"reply": ...}` response is still the guaranteed path today (§2).
+
+## 7. Testing your middleware against the mod
 
 - `e2e/stub-middleware.py` is a ~60-line reference implementation of this
   contract (untagged → `202`, tagged → `200`, tagged + `failme` → `502`;
@@ -170,7 +213,7 @@ you can rely on:
   instance at it (`/mtriggers set middlewareBase http://127.0.0.1:32100`),
   and chat.
 
-## 7. Minimal compatibility checklist
+## 8. Minimal compatibility checklist
 
 A middleware is contract-compatible when it:
 
@@ -184,3 +227,11 @@ A middleware is contract-compatible when it:
       tolerate (mod-side timeout does not exist; nothing but the HTTP stack
       will time you out)
 - [ ] keeps every reply line ≤ 256 chars if `publicReplies` can be on
+
+And optionally, for the push channel (§6):
+
+- [ ] serves `GET /api/ws` as a WebSocket endpoint when it wants to push
+      unprompted; serves nothing when it doesn't (the mod reconnects
+      forever, so a refused connection is a supported steady state)
+- [ ] pushes only `{"text": str, "mode": "local"|"public"}` frames and
+      tolerates the client never sending anything back
