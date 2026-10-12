@@ -9,6 +9,33 @@ base {
 	archivesName = project.archives_base_name
 }
 
+// E2E driver mod: a second source set so it compiles with the project but is
+// never packaged into the production jar (remapJar only uses sourceSets.main).
+// The loom run below loads BOTH mods: the driver (this source set) and the
+// mod under test (main's output is on the e2e runtime classpath).
+sourceSets {
+	e2e {
+		java.srcDirs = ['src/e2e/java']
+		resources.srcDirs = ['src/e2e/resources']
+		compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+		runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+	}
+}
+
+loom {
+	runs {
+		e2eClient {
+			client()
+			source = sourceSets.e2e
+			// Keep the game dir inside e2e/ so run-e2e.sh's paths are stable.
+			runDir 'e2e/run'
+			// Auto-join the local vanilla server the harness script starts,
+			// with a fixed username (the harness asserts against it).
+			programArgs '--quickPlayMultiplayer', '127.0.0.1:25565', '--username', 'E2ETester'
+		}
+	}
+}
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
@@ -32,11 +59,10 @@ test {
 	useJUnitPlatform()
 }
 
-// TODO(runClient): full-fidelity pre-launch verification via a dev vanilla
-// client (`./gradlew runClient`) — verifies the actual mixin injection point
-// against a real game without touching the Permadeath instance. Deferred by
-// owner decision; for now the mixin target is verified by launching the real
-// instance and checking logs/latest.log for the messagetriggers lines.
+// Full-fidelity pre-launch verification lives in the e2e harness
+// (e2e/run-e2e.sh): it spawns a real dev client with only this mod loaded,
+// joins a local vanilla server, and drives the chat capture path end to end
+// through the actual mixin injection point.
 
 processResources {
 	inputs.property 'version', project.version

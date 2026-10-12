@@ -1,0 +1,12 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.messagetriggers.e2e.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"ChatRecorderMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

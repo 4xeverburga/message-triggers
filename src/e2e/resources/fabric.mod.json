@@ -1,0 +1,17 @@
+{
+	"schemaVersion": 1,
+	"id": "e2edriver",
+	"version": "0.1.0",
+	"name": "MemoChat E2E Driver",
+	"description": "Test-only driver mod for the message-triggers e2e harness. Never ship this.",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["com.messagetriggers.e2e.E2EDriverMod"]
+	},
+	"mixins": ["e2edriver.mixins.json"],
+	"depends": {
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

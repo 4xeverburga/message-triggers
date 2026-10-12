@@ -10,3 +10,7 @@ logs/
 .idea/
 *.iml
 .vscode/
+
+# e2e runtime artifacts
+/e2e/.server/
+/e2e/.cache/

@@ -41,3 +41,12 @@ the box with `middlewareBase = http://127.0.0.1:3000` and
 The jar is written to `build/libs/`. Requires JDK 25 to run Gradle (Fabric
 Loom 1.18) and targets Java 21. The mod depends on Fabric API's client
 command module (`fabric-command-api-v2`).
+
+## E2E test
+
+`e2e/run-e2e.sh` spawns a real Minecraft 1.21.1 client with only this mod
+loaded, joins a local vanilla server, injects scripted chat lines through
+the real `ChatHud` injection point, and asserts the bridge POSTs them to a
+stub middleware and echoes the replies into the HUD. See `e2e/README.md`.
+First run downloads the vanilla server jar and the Minecraft client
+(~650 MB total, cached); later runs take ~2 minutes.

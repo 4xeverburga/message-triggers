@@ -1,0 +1,26 @@
+name: e2e
+
+# Manual trigger only: spawning a real Minecraft client in CI needs xvfb +
+# software GL and is too flaky to gate pushes. Run it from the Actions tab
+# when the chat-capture path changes.
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: message-triggers
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install xvfb (headless display for the Minecraft client)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Run the e2e harness
+        working-directory: message-triggers
+        run: xvfb-run -a e2e/run-e2e.sh

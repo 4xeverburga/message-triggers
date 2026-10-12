@@ -10,3 +10,9 @@ pluginManagement {
 }
 
 rootProject.name = 'message-triggers'
+
+// The E2E harness (driver mod + stub middleware + vanilla-server script) lives
+// in e2e/ but is NOT a Gradle subproject: the driver mod is a second source
+// set (src/e2e) in this project with its own loom run config (runE2eClient).
+// A loom subproject depending on this project's jar fails at configuration
+// time (loom reads the not-yet-built remapped jar), so everything stays here.
