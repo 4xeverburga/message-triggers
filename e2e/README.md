@@ -1,9 +1,27 @@
 # message-triggers E2E harness
 
-Spawns a **real Minecraft 1.21.1 client** (Fabric dev env via Loom's
+Spawns a **real Minecraft client** (Fabric dev env via Loom's
 `runE2eClient` run config) with only the message-triggers mod loaded, joins a local
 vanilla server, and drives a scripted chat scenario through the real
 `ChatHud` injection point — the same mixin hook production uses.
+
+## Version branches
+
+The harness is version-agnostic: the Minecraft version comes from
+`minecraft_version` in `gradle.properties`, and the vanilla server jar is
+fetched for that version on demand. Testing on another Minecraft version
+means only:
+
+1. Branch per version (pattern: `1.21.1`, `1.20.x`, ...) off the closest
+   existing branch.
+2. Bump the fabric toolchain block in `gradle.properties`
+   (`minecraft_version`, `yarn_mappings`, `loader_version`, `fabric_version`);
+   when the mod code needs version-specific changes, make them on the
+   version branch. Versions live at https://fabricmc.net/develop and
+   https://fabricmc.net/use.
+3. If the harness breaks across versions (API moves in `ChatHud`,
+   quickPlay args, etc.), fix it on that branch — the driver mod is plain
+   Fabric/mixin code and may need adjusting for older targets.
 
 Scope: **message-triggers only**. The middleware is a deterministic stub
 (`stub-middleware.py`, port 32100) implementing the `/api/chat` contract;

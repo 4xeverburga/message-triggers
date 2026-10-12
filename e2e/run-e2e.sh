@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# E2E harness for the message-triggers mod (Minecraft 1.21.1).
+# E2E harness for the message-triggers mod.
 #
 # Spawns a REAL Minecraft client (Fabric dev env via Loom's runClient) with
 # ONLY the message-triggers mod loaded, joins a local vanilla server, injects
@@ -24,7 +24,14 @@ RUN_DIR="$E2E_DIR/run"
 CACHE_DIR="$E2E_DIR/.cache"
 SERVER_DIR="$E2E_DIR/.server"
 
-MC_VERSION="1.21.1"
+# The harness follows the mod: MC_VERSION comes from gradle.properties, so
+# each version branch (e.g. 1.21.1) runs e2e against its own Minecraft
+# version with no per-branch changes to this script.
+MC_VERSION="$(sed -n 's/^minecraft_version=//p' "$ROOT_DIR/gradle.properties")"
+if [ -z "$MC_VERSION" ]; then
+	echo "[e2e] ERROR: minecraft_version not found in $ROOT_DIR/gradle.properties"
+	exit 1
+fi
 STUB_PORT=32100
 CLIENT_TIMEOUT_SECS=900
 SERVER_TIMEOUT_SECS=180
