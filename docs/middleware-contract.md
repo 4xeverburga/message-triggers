@@ -4,14 +4,35 @@ This is everything a middleware (the HTTP side) developer needs to know to
 talk to the Message Triggers mod. No other endpoints exist; the mod is a
 pure HTTP client — it POSTs and never listens.
 
+## 0. Deployment model: one client, one user, no server install
+
+Message Triggers is a **client-side Fabric mod** for the player's own
+client — for-the-user, by-the-user. There is **no server-side component**:
+
+- Servers you play on need nothing installed and see nothing — the only
+  server-visible side effect is that, when `publicReplies` is on, the mod
+  sends the agent's replies to the server **as you**, like any chat message
+  you'd type (nobody can tell a mod is involved).
+- It runs in exactly one session: the chat stream you receive is the stream
+  of lines rendered in *your* client's HUD — your own outgoing messages
+  (as echoed by the server), other players' messages, whatever appears in
+  your chat. From the middleware's point of view there is one producer and
+  it stops producing when your client closes. If several clients of yours
+  (or other players' clients, if they install it themselves) point at the
+  same `middlewareBase`, their streams interleave with no separation — give
+  each install its own endpoint if that matters to you.
+- Privacy-wise, everything a middleware receives is chat **you personally
+  saw**, including other people talking to each other. Host it locally and
+  treat that history as yours, not a public service.
+
 ```
-Minecraft client (mod installed)
-        │  POST /api/chat      every parsed chat line (see below)
+Your Minecraft client (mod installed, nothing server-side)
+        │  POST /api/chat      every chat line YOUR client renders
         ▼
 Middleware (your side)  →  consumes, processes, answers
         │  response body      JSON {"reply": "..."} when it was a trigger
         ▼
-Mod echoes reply into the chat HUD (or sends it to the server as you)
+Mod echoes reply into YOUR chat HUD (or sends it to the server as YOU)
 ```
 
 ## 1. Endpoint: `POST {middlewareBase}/api/chat`
@@ -31,12 +52,16 @@ Mod echoes reply into the chat HUD (or sends it to the server as you)
 
 | Field     | Type   | Notes |
 |-----------|--------|-------|
-| `sender`  | string | The player name as captured from the chat line (`<sender>` portion) |
+| `sender`  | string | Whoever typed the line: the mod owner, another player in the session, or the echo of a reply the mod sent (see §3). Do **not** assume `sender` is the client's user |
 | `message` | string | The message text without the `<sender> ` prefix. May contain newlines (multi-line chat is captured as one line with `\n`) and any UTF-8 the game renders |
 
-The mod captures **player chat only**: vanilla renders a player chat line as
-`<sender> message`; system messages, join/leave notices, etc. are ignored.
-One incoming line = exactly one POST.
+The mod captures every line **the configured client** renders as player
+chat — vanilla renders a player chat line as `<sender> message`; system
+messages, join/leave notices, etc. are ignored. One capture = exactly one
+POST. So the stream naturally includes other players' chatter (that's the
+history part of the design: the agent sees the whole conversation the user
+sees), while *decisions* — what counts as a trigger — are made only on what
+the user addresses to it.
 
 ### Two categories of message (decided client-side, not by you)
 
@@ -111,12 +136,16 @@ you can rely on:
   generate).
 - No retries: a failed request is logged and (for tagged messages) surfaces
   the cached failure message. Idempotency is on you if you retry.
-- No inbound traffic: the mod opens no server socket, has no health route,
-  and polls nothing. It only speaks when spoken to (chat), and it does not
-  send periodic heartbeats — consider logging per-sender activity to track
-  liveness instead.
-- No ME/player-visible state mutation beyond chat: the mod's other surface
-  is out of scope — it never sends commands or controls movement.
+- No inbound traffic: the mod opens no server socket, exposes no health
+  route, and polls nothing. It only speaks on chat arrival and then goes
+  silent while your answer travels back the HTTP response path — there are
+  no heartbeats; gauge liveness from activity (or a client closing its
+  session means no future traffic).
+- No game-control surface: the mod never sends commands, moves the player,
+  or reads inventory/position — its only effect on the game is putting text
+  into (or out of) the chat. If your agent needs to act inside the game,
+  that is a different, server-side integration; this mod is intentionally
+  not it.
 
 ## 5. Tunables that affect your side (`/mtriggers`, persisted to `bridge.json`)
 
