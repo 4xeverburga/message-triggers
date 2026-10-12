@@ -1,7 +1,4 @@
 {
   "middlewareBase": "http://127.0.0.1:3000",
-  "triggerPhrase": "@bot",
-  "thinkingAck": "...thinking...",
-  "publicReplies": true,
-  "sentMemory": 16
+  "publicReplies": true
 }

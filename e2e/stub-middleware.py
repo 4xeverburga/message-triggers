@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic middleware stub for the message-triggers e2e harness.
 
-Implements contract v3 (docs/middleware-contract.md) — ONE surface, the
+Implements contract v4 (docs/middleware-contract.md) — ONE surface, the
 WebSocket, served by aiohttp on ONE port (same-origin, like a real
 middleware). There is NO /api/chat: the mod forwards nothing over HTTP.
 
@@ -15,11 +15,13 @@ middleware). There is NO /api/chat: the mod forwards nothing over HTTP.
       to exercise the failure case); the loop drains the queue as
       {"text": reply, "mode": "public"} frames, which the mod then sends
       to the server AS the player (publicReplies=true in the harness
-      config). On connect the stub pushes one local-mode frame
-      immediately (lands before a world is joined — exercises the mod's
-      not-in-a-world fallback), then repeats a public-mode ping every 1s
-      tick (exercises the sent-to-server path and its echo back as chat
-      frames — the feedback loop).
+      config). On connect the stub STREAMS one local message as three
+      consecutive localStream chunks (lands before a world is joined —
+      exercises the mod's not-in-a-world fallback AND in-place stream
+      rendering: the chunks must accumulate into ONE HUD line), then
+      repeats a public-mode ping every 1s tick (exercises the mod's
+      sent-to-server path and its echo back as chat frames — the feedback
+      loop; it also closes the stream).
 
 Requires aiohttp (pip install aiohttp).
 Usage: stub-middleware.py [port] [request-log-path]
@@ -48,10 +50,14 @@ async def ws(request: web.Request) -> web.WebSocketResponse:
     sock = web.WebSocketResponse()
     await sock.prepare(request)
     # The first push lands while the client is still on its title screen
-    # (exercises the mod's not-in-a-world fallback); later repeats land in
-    # a joined world (exercise the public path: sent to the server AS the
-    # player and echoed back by the server).
-    await sock.send_json({"text": WS_LOCAL, "mode": "local"})
+    # (exercises the mod's not-in-a-world fallback); it arrives as three
+    # localStream chunks that must accumulate into ONE HUD line (in-place
+    # streaming). Later repeats land in a joined world (exercise the public
+    # path: sent to the server AS the player and echoed back by the server —
+    # the first public ping also closes the stream).
+    await sock.send_json({"text": "WS-LOCAL-", "mode": "localStream"})
+    await sock.send_json({"text": "MSG: the middleware ", "mode": "localStream"})
+    await sock.send_json({"text": "says hi", "mode": "localStream"})
     # One loop, two duties: handle inbound chat frames as they arrive, and
     # every tick drain the reply queue + repeat the public ping (drives
     # both the reply path and the feedback-loop echo frames).

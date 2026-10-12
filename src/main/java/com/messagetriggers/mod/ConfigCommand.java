@@ -78,10 +78,7 @@ public final class ConfigCommand {
 	private static String valueOf(BridgeConfig config, String key) {
 		return switch (key) {
 			case "middlewareBase" -> config.middlewareBase();
-			case "triggerPhrase" -> config.triggerPhrase();
-			case "thinkingAck" -> config.thinkingAck();
 			case "publicReplies" -> Boolean.toString(config.publicReplies());
-			case "sentMemory" -> Integer.toString(config.sentMemory());
 			default -> throw new IllegalArgumentException("unknown key: " + key);
 		};
 	}

@@ -3,19 +3,17 @@ package com.messagetriggers.mod;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Contract tests for the WS channel's pure logic (no sockets, no Minecraft):
  *
  * URI derivation: {middlewareBase} → its ws[s] form + /api/ws
- * (one origin, one trust decision — contract v3 has NO other endpoint).
+ * (one origin, one trust decision — contract v4 has NO other endpoint).
  *
- * Frame parsing: {"text": "...", "mode": "local"|"public"} — mode optional,
- * default local. Anything malformed, ambiguous or empty is DROPPED (null),
- * never partially displayed.
+ * Frame parsing: {"text": "...", "mode": "local"|"public"|"localStream"} —
+ * mode optional, default local. Anything malformed, ambiguous or empty is
+ * DROPPED (null), never partially displayed.
  *
  * Outbound frame building: {"type": "chat", "sender", "message"}.
  */
@@ -45,16 +43,20 @@ class WsChannelTest {
 	// ── parse ──────────────────────────────────────────────────────────────
 
 	@Test
-	void parsesLocalAndPublicModes() {
-		assertFalse(WsChannel.parse("{\"text\": \"hello\", \"mode\": \"local\"}").isPublic());
-		assertTrue(WsChannel.parse("{\"text\": \"hello\", \"mode\": \"public\"}").isPublic());
+	void parsesAllThreeModes() {
+		assertEquals(WsChannel.Mode.LOCAL,
+				WsChannel.parse("{\"text\": \"hello\", \"mode\": \"local\"}").mode());
+		assertEquals(WsChannel.Mode.PUBLIC,
+				WsChannel.parse("{\"text\": \"hello\", \"mode\": \"public\"}").mode());
+		assertEquals(WsChannel.Mode.LOCAL_STREAM,
+				WsChannel.parse("{\"text\": \"hel\", \"mode\": \"localStream\"}").mode());
 	}
 
 	@Test
 	void modeIsOptionalAndDefaultsToLocal() {
 		WsChannel.Push push = WsChannel.parse("{\"text\": \"just text\"}");
 		assertEquals("just text", push.text());
-		assertFalse(push.isPublic());
+		assertEquals(WsChannel.Mode.LOCAL, push.mode());
 	}
 
 	@Test
@@ -80,8 +82,8 @@ class WsChannelTest {
 
 	@Test
 	void buildsTypedChatFrames() {
-		assertEquals("{\"type\":\"chat\",\"sender\":\"4verburg\",\"message\":\"@bot hello\"}",
-				WsChannel.buildChatFrame("4verburg", "@bot hello"));
+		assertEquals("{\"type\":\"chat\",\"sender\":\"4verburg\",\"message\":\"hello there\"}",
+				WsChannel.buildChatFrame("4verburg", "hello there"));
 	}
 
 	@Test

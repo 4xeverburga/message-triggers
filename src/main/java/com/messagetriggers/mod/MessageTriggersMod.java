@@ -40,7 +40,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 		if (BridgeConfig.loadDefaults() != null && !java.nio.file.Files.exists(configPath)) {
 			LOGGER.info("bridge.json not found at {} — using bundled defaults (change in-game via /mtriggers)", configPath);
 		}
-		LOGGER.info("bridge loaded: {} (trigger {})", bridge.middlewareBase(), bridge.triggerPhrase());
+		LOGGER.info("bridge loaded: {}", bridge.middlewareBase());
 		reconnectWsChannel(bridge.config());
 		registerCommands();
 	}
@@ -85,7 +85,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 	 * swaps replace the bridge (same outbox wiring), and a changed
 	 * middlewareBase means the channel must point at the new origin at
 	 * set-time without a restart. The channel itself is ALWAYS on: it is
-	 * the mod's only network surface (contract v3).
+	 * the mod's only network surface (contract v4).
 	 */
 	private static void reconnectWsChannel(BridgeConfig config) {
 		if (wsChannel != null) {
@@ -98,17 +98,17 @@ public final class MessageTriggersMod implements ClientModInitializer {
 
 	/**
 	 * Push sink for the ws channel (called on the WS thread): hops onto the
-	 * client thread and routes to the current bridge.
+	 * client thread and routes to the current bridge by push mode.
 	 */
-	public static void onPush(String text, boolean isPublic) {
+	public static void onPush(WsChannel.Push push) {
 		MinecraftClient.getInstance().execute(() -> {
 			if (bridge == null) {
 				return;
 			}
-			if (isPublic) {
-				bridge.pushPublic(text);
-			} else {
-				bridge.pushLocal(text);
+			switch (push.mode()) {
+				case PUBLIC -> bridge.pushPublic(push.text());
+				case LOCAL -> bridge.pushLocal(push.text());
+				case LOCAL_STREAM -> bridge.pushStreamChunk(push.text());
 			}
 		});
 	}

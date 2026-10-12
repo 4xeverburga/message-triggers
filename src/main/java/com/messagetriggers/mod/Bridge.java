@@ -1,29 +1,32 @@
 package com.messagetriggers.mod;
 
+import com.messagetriggers.mod.mixin.ChatHudAccessor;
+import com.messagetriggers.mod.mixin.ChatHudInvoker;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.hud.ChatHud;
+import net.minecraft.client.gui.hud.ChatHudLine;
 import net.minecraft.text.Text;
 
 import java.nio.file.Path;
-import java.util.ArrayDeque;
+import java.util.List;
 
 /**
- * The chat ⇄ middleware bridge (contract v3): ONE channel, the WebSocket.
+ * The chat ⇄ middleware bridge (contract v4): ONE channel, the WebSocket.
  *
  *  - Every chat line shaped "<player> message" is forwarded to the
  *    middleware as a {"type": "chat"} frame on the WS (WsChannel.sendChat),
  *    fire-and-forget: when the socket is down the line is dropped — the
  *    middleware's queue-and-discipline problem, mirror side of the pushes.
- *    There is no HTTP anywhere in this mod.
+ *    There is no HTTP anywhere in this mod and no client-side trigger
+ *    concept: what to answer, and when, is entirely the middleware's call.
  *  - Messages that come back (WS frames, any time) are displayed by
- *    deliver(): sent to the server as the player when publicReplies is on,
- *    local echo otherwise.
- *  - The thinking ack is purely client-side decoration: a line starting
- *    with the trigger phrase shows it the moment it is typed. It is the
- *    middleware's decision (from the forwarded lines) what to answer.
- *  - Feedback loop guard: the server echo of a message we sent comes back
- *    shaped "<player> message" like any other chat. Those echoes are still
- *    forwarded (so replies enter the history) but are never treated as
- *    triggers, even if the text happens to start with the trigger phrase.
+ *    pushLocal/pushPublic: public frames are sent to the server as the
+ *    player when publicReplies is on, local frames echo into the HUD.
+ *  - localStream frames stream text: consecutive chunks accumulate into ONE
+ *    local HUD line that is re-rendered in place as each chunk arrives, so
+ *    a long answer starts appearing before it is finished. Streaming is
+ *    local-only — it never sends anything to the server. Any normal
+ *    (local/public) push closes the active stream.
  *
  * All tunables come from bridge.json via BridgeConfig (bundled defaults are
  * used when the file is missing — see BridgeConfig). Config can be changed
@@ -37,8 +40,11 @@ public final class Bridge {
 
 	private final BridgeConfig config;
 	private final Outbox outbox;
-	/** Lines we sent as the player; their echoes must never re-trigger. */
-	private final ArrayDeque<String> sentLines = new ArrayDeque<>();
+
+	/** Accumulated text of the active stream, or null when none is open. */
+	private String streamText;
+	/** The HUD line currently backing the active stream (replaced in place). */
+	private ChatHudLine streamLine;
 
 	private Bridge(BridgeConfig config, Outbox outbox) {
 		this.config = config;
@@ -64,15 +70,12 @@ public final class Bridge {
 		return config.middlewareBase();
 	}
 
-	public String triggerPhrase() {
-		return config.triggerPhrase();
-	}
-
 	/**
 	 * Middleware push (WS channel, local mode): echo into the local HUD only.
 	 * publicReplies does not apply — the middleware picked the mode explicitly.
 	 */
 	public void pushLocal(String text) {
+		closeStream();
 		say(text);
 	}
 
@@ -83,7 +86,40 @@ public final class Bridge {
 	 * anything leaves their machine).
 	 */
 	public void pushPublic(String text) {
+		closeStream();
 		deliver(text);
+	}
+
+	/**
+	 * One localStream chunk (WS channel): appended to the active stream's
+	 * text, which is re-rendered as ONE HUD line. The first chunk of a
+	 * stream opens the line; a later normal push closes it (closeStream).
+	 * Local display only — streaming never sends anything to the server.
+	 */
+	public void pushStreamChunk(String chunk) {
+		streamText = streamText == null ? chunk : streamText + chunk;
+		ChatHud hud = MinecraftClient.getInstance().inGameHud.getChatHud();
+		ChatHudLine updated = new ChatHudLine(
+				MinecraftClient.getInstance().inGameHud.getTicks(),
+				Text.literal(streamText), null, null);
+		List<ChatHudLine> messages = ((ChatHudAccessor) hud).getMessages();
+		if (streamLine != null) {
+			int index = messages.lastIndexOf(streamLine);
+			if (index >= 0) {
+				messages.set(index, updated);
+			} else {
+				messages.add(updated);
+			}
+		} else {
+			messages.add(updated);
+		}
+		((ChatHudInvoker) hud).invokeRefresh();
+		streamLine = updated;
+	}
+
+	private void closeStream() {
+		streamText = null;
+		streamLine = null;
 	}
 
 	public void onChatMessage(String rawText) {
@@ -91,17 +127,7 @@ public final class Bridge {
 		if (parsed == null) {
 			return;
 		}
-		String sender = parsed[0];
-		String message = parsed[1];
-
-		// Echo of a message we sent as the player: forward it as history but
-		// never let it act as a trigger (even if it starts with the trigger
-		// phrase).
-		boolean echo = sentLines.remove(message);
-		if (!echo && ChatLineParser.isTrigger(message, config.triggerPhrase())) {
-			say(config.thinkingAck());
-		}
-		outbox.sendChat(sender, message);
+		outbox.sendChat(parsed[0], parsed[1]);
 	}
 
 	/**
@@ -131,10 +157,6 @@ public final class Bridge {
 				continue;
 			}
 			client.player.networkHandler.sendChatMessage(line);
-			sentLines.addLast(line);
-			while (sentLines.size() > config.sentMemory()) {
-				sentLines.removeFirst();
-			}
 		}
 	}
 

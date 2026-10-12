@@ -3,7 +3,7 @@
 	"id": "messagetriggers",
 	"version": "${version}",
 	"name": "Message Triggers",
-	"description": "Bridges Minecraft chat to a localhost HTTP agent bridge. Configurable in-game via /mtriggers.",
+	"description": "Bridges Minecraft chat to a localhost agent over a WebSocket. Configurable in-game via /mtriggers.",
 	"environment": "client",
 	"entrypoints": {
 		"client": ["com.messagetriggers.mod.MessageTriggersMod"]

@@ -9,10 +9,9 @@ import java.util.regex.Pattern;
  *
  *  - chat lines shaped "<player> message" are player chat; anything else
  *    (system messages, the bridge's own local echoes) is ignored
- *  - a message starting with the trigger phrase is a trigger (client-side
- *    decoration only — the middleware decides what to answer)
  *  - the outbound WS frame {"type": "chat", "sender", "message"} is built
- *    by WsChannel.buildChatFrame (contract v3 — no HTTP anywhere)
+ *    by WsChannel.buildChatFrame (contract v4 — no HTTP anywhere, no
+ *    client-side trigger concept: the middleware decides what to answer)
  */
 public final class ChatLineParser {
 	/** Same parse contract as the old ChatTriggers criteria "<${name}> ${message}". */
@@ -33,7 +32,7 @@ public final class ChatLineParser {
 		return new String[] { matcher.group(1), matcher.group(2) };
 	}
 
-	public static boolean isTrigger(String message, String triggerPhrase) {
-		return message.startsWith(triggerPhrase);
+	public static boolean isPlayerChat(String rawText) {
+		return parse(rawText) != null;
 	}
 }

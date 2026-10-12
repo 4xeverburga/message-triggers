@@ -91,10 +91,7 @@ rm -f "$RUN_DIR/e2e-result.json" "$RUN_DIR/stub-requests.jsonl"
 cat > "$RUN_DIR/config/messagetriggers/bridge.json" <<EOF
 {
   "middlewareBase": "http://127.0.0.1:$STUB_PORT",
-  "triggerPhrase": "@bot",
-  "thinkingAck": "...thinking...",
-  "publicReplies": true,
-  "sentMemory": 16
+  "publicReplies": true
 }
 EOF
 

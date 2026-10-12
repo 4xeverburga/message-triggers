@@ -41,8 +41,8 @@ class ConfigCommandTest {
 		ConfigCommand.Result result = ConfigCommand.handle("", sampleConfig(), configPath);
 		assertTrue(result.success());
 		assertNull(result.config());
-		assertTrue(result.feedback().contains("sentMemory = 16"));
-		assertTrue(result.feedback().contains("triggerPhrase = @bot"));
+		assertTrue(result.feedback().contains("publicReplies = true"));
+		assertTrue(result.feedback().contains("middlewareBase = http://127.0.0.1:3000"));
 	}
 
 	@Test
@@ -57,28 +57,20 @@ class ConfigCommandTest {
 
 	@Test
 	void setAppliesValueAndReturnsNewConfig() {
-		ConfigCommand.Result result = ConfigCommand.handle("set sentMemory 8", sampleConfig(), configPath);
+		ConfigCommand.Result result = ConfigCommand.handle("set publicReplies false", sampleConfig(), configPath);
 		assertTrue(result.success());
 		assertNotNull(result.config());
-		assertEquals(8, result.config().sentMemory());
-		assertTrue(result.feedback().contains("sentMemory"));
-	}
-
-	@Test
-	void setTriggerPhraseMayContainSpaces() {
-		ConfigCommand.Result result = ConfigCommand.handle("set triggerPhrase @hey there", sampleConfig(), configPath);
-		assertTrue(result.success());
-		assertEquals("@hey there", result.config().triggerPhrase());
+		assertEquals(false, result.config().publicReplies());
+		assertTrue(result.feedback().contains("publicReplies"));
 	}
 
 	@Test
 	void resetReturnsBundledDefaults() {
-		BridgeConfig customized = sampleConfig().with("sentMemory", "3");
+		BridgeConfig customized = sampleConfig().with("publicReplies", "false");
 		ConfigCommand.Result result = ConfigCommand.handle("reset", customized, configPath);
 		assertTrue(result.success());
 		assertNotNull(result.config());
-		assertEquals(16, result.config().sentMemory());
-		assertEquals("@bot", result.config().triggerPhrase());
+		assertEquals(true, result.config().publicReplies());
 	}
 
 	@Test
@@ -106,14 +98,14 @@ class ConfigCommandTest {
 
 	@Test
 	void setMissingValueFails() {
-		ConfigCommand.Result result = ConfigCommand.handle("set triggerPhrase", sampleConfig(), configPath);
+		ConfigCommand.Result result = ConfigCommand.handle("set publicReplies", sampleConfig(), configPath);
 		assertFalse(result.success());
 		assertNull(result.config());
 	}
 
 	@Test
 	void setInvalidValueFails() {
-		ConfigCommand.Result result = ConfigCommand.handle("set sentMemory 0", sampleConfig(), configPath);
+		ConfigCommand.Result result = ConfigCommand.handle("set publicReplies maybe", sampleConfig(), configPath);
 		assertFalse(result.success());
 		assertNull(result.config());
 	}

@@ -8,7 +8,10 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.hud.ChatHud;
+import net.minecraft.client.gui.hud.ChatHudLine;
 import net.minecraft.text.Text;
+import com.messagetriggers.e2e.mixin.ChatHudAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +33,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * v3; the mod does not speak HTTP at all):
  *
  *   untagged line   → {"type": "chat"} WS frame → logged by the stub
- *   tagged line     → thinking ack in HUD → stub queues a reply → WS push
- *                     (public mode) → sent to the server AS the player →
- *                     echoed back into the HUD
+ *   tagged line     → stub queues a reply → WS push (public mode) → sent
+ *                     to the server AS the player → echoed back into the HUD
  *   tagged failure  → stub queues the failure reply → same WS push path
+ *   connect push    → localStream chunks → ONE accumulating HUD line
+ *                     (asserted directly against the chat HUD's backing
+ *                     list — an in-place edit never passes addMessage)
  *
  * The verdict is written to <gameDir>/e2e-result.json and the client stops
  * itself; e2e/run-e2e.sh reads the result and greps the client log for the
@@ -49,11 +54,10 @@ public final class E2EDriverMod implements ClientModInitializer {
 	static final String UNTAGGED_LINE = "<" + SENDER + "> hello world";
 	static final String TAGGED_LINE = "<" + SENDER + "> " + TRIGGER + " hello";
 	static final String FAILURE_LINE = "<" + SENDER + "> " + TRIGGER + " failme please";
-	static final String ACK = "...thinking...";
 	static final String REPLY = "E2E-REPLY-OK";
 	static final String FAILURE_REPLY = "STUB-FAILURE-REPLY";
-	// Pushed by the stub's ws server: WS_LOCAL/WS_PUBLIC on connect, the
-	// replies (public mode) when the matching tagged chat POST arrives.
+	// Streamed by the stub's ws server as localStream chunks on connect;
+	// the accumulated text must end up in exactly ONE HUD line.
 	static final String WS_LOCAL = "WS-LOCAL-MSG: the middleware says hi";
 	static final String WS_PUBLIC = "WS-PUBLIC-MSG: pushed to the world";
 
@@ -131,11 +135,11 @@ public final class E2EDriverMod implements ClientModInitializer {
 				}
 			}
 			case WAIT_REPLY -> {
-				if (seen(ACK) && seen(REPLY)) {
+				if (seen(REPLY)) {
 					inject(FAILURE_LINE);
 					next(Phase.WAIT_FAILURE);
 				} else if (ticksInPhase >= REPLY_TIMEOUT_TICKS) {
-					finish(client, false, "no ack/reply within the timeout");
+					finish(client, false, "no reply within the timeout");
 				}
 			}
 			case WAIT_FAILURE -> {
@@ -161,6 +165,20 @@ public final class E2EDriverMod implements ClientModInitializer {
 
 	private boolean seen(String needle) {
 		return hudLines.stream().anyMatch(line -> line.contains(needle));
+	}
+
+	/**
+	 * Current HUD texts, read directly from the chat HUD's backing list.
+	 * Needed for the streaming check: an in-place stream edit never passes
+	 * through addMessage, so ChatRecorderMixin never sees it.
+	 */
+	private static List<String> hudTexts() {
+		ChatHud hud = MinecraftClient.getInstance().inGameHud.getChatHud();
+		List<String> texts = new ArrayList<>();
+		for (ChatHudLine line : ((ChatHudAccessor) hud).getMessages()) {
+			texts.add(line.content().getString());
+		}
+		return texts;
 	}
 
 	/** Injects a chat line through the real HUD entry point (one-arg addMessage delegates to the hooked three-arg overload). */
@@ -192,10 +210,10 @@ public final class E2EDriverMod implements ClientModInitializer {
 
 	private void finish(MinecraftClient client, boolean pass, String error) {
 		List<Check> checks = new ArrayList<>();
-		check(checks, seen(ACK), "thinking ack appeared in the HUD");
 		check(checks, seen(REPLY), "agent reply pushed via ws and echoed into the HUD");
 		check(checks, seen(FAILURE_REPLY), "failure reply pushed via ws and echoed into the HUD");
-		check(checks, seen(WS_LOCAL), "ws local push echoed into the HUD");
+		long streamedLines = hudTexts().stream().filter(text -> text.contains(WS_LOCAL)).count();
+		check(checks, streamedLines == 1, "streamed local push rendered as ONE in-place HUD line");
 		check(checks, seen(WS_PUBLIC), "ws public push echoed into the HUD");
 		boolean middlewareOk = verify(checks);
 		boolean result = pass && middlewareOk;

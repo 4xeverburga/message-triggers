@@ -24,9 +24,9 @@ means only:
    Fabric/mixin code and may need adjusting for older targets.
 
 Scope: **message-triggers only**. The middleware is a deterministic stub
-(`stub-middleware.py`, port 32100) implementing contract v3 — the single
-bidirectional `/api/ws` channel (chat in, pushes out), no HTTP at all; the
-MemoChat mod is NOT loaded.
+(`stub-middleware.py`, port 32100) implementing contract v4 — the single
+bidirectional `/api/ws` channel (chat in, pushes out incl. streamed local
+pushes), no HTTP at all; the MemoChat mod is NOT loaded.
 
 ## Run it
 
@@ -44,10 +44,9 @@ caches). Later runs take ~2 minutes.
 |---|---|
 | `bridge loaded` in client log | the mod booted with the harness config |
 | `ws push channel connected` in client log | the mod connected `/api/ws` to the stub |
-| thinking ack in HUD | tagged line shows `...thinking...` immediately |
+| streamed local push as ONE HUD line | the stub's connect message arrives as `localStream` chunks and renders as a single accumulating in-place HUD line (asserted directly against the chat HUD's backing list) |
 | agent reply pushed via ws | the stub's reply arrives as a `/api/ws` frame (public mode), sent to the server AS the player and echoed into the HUD |
 | failure reply pushed via ws | the stub's failure case travels the same push path |
-| ws local push in HUD | the stub's `mode: local` connect frame appears |
 | ws public push in HUD | the stub's `mode: public` ping goes to the server and is echoed back |
 | chat frames reached middleware | the injected lines are forwarded as `{"type": "chat"}` WS frames over the same `/api/ws` socket (untagged, tagged, failure and sender logged by the stub) |
 
@@ -64,7 +63,7 @@ the scripted lines, polls for the expected echoes, writes the verdict to
   - `java/.../E2EDriverMod.java` — scenario state machine + assertions
   - `java/.../mixin/ChatRecorderMixin.java` — HUD line recorder
   - `resources/fabric.mod.json`, `resources/e2edriver.mixins.json`
-- `stub-middleware.py` — `/api/chat` stub + request log
+- `stub-middleware.py` — `/api/ws` stub + frame log
 - `run-e2e.sh` — orchestration (configs, server, client, verdict)
 - `../.github/workflows/e2e.yml` — manual CI trigger (`workflow_dispatch`,
   xvfb; Minecraft-in-CI is flaky, so it never gates pushes)

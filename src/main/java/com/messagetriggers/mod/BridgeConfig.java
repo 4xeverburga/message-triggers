@@ -30,25 +30,16 @@ public final class BridgeConfig {
 	static final String DEFAULTS_RESOURCE = "/bridge.default.json";
 
 	private final String middlewareBase;
-	private final String triggerPhrase;
-	private final String thinkingAck;
 	private final boolean publicReplies;
-	/** How many recently sent reply lines to remember for the echo guard. */
-	private final int sentMemory;
 
-	private BridgeConfig(String middlewareBase, String triggerPhrase, String thinkingAck,
-			boolean publicReplies, int sentMemory) {
+	private BridgeConfig(String middlewareBase, boolean publicReplies) {
 		this.middlewareBase = middlewareBase;
-		this.triggerPhrase = triggerPhrase;
-		this.thinkingAck = thinkingAck;
 		this.publicReplies = publicReplies;
-		this.sentMemory = sentMemory;
 	}
 
 	/** Every tunable, in display order (used by /mtriggers show and tests). */
 	public static List<String> keys() {
-		return List.of("middlewareBase", "triggerPhrase", "thinkingAck",
-				"publicReplies", "sentMemory");
+		return List.of("middlewareBase", "publicReplies");
 	}
 
 	/**
@@ -82,22 +73,16 @@ public final class BridgeConfig {
 		}
 	}
 
-	static BridgeConfig fromJsonObject(JsonObject json) {
+	public static BridgeConfig fromJsonObject(JsonObject json) {
 		return new BridgeConfig(
 				requiredString(json, "middlewareBase"),
-				requiredString(json, "triggerPhrase"),
-				requiredString(json, "thinkingAck"),
-				requiredBoolean(json, "publicReplies"),
-				requiredInt(json, "sentMemory"));
+				requiredBoolean(json, "publicReplies"));
 	}
 
 	public JsonObject toJsonObject() {
 		JsonObject json = new JsonObject();
 		json.addProperty("middlewareBase", middlewareBase);
-		json.addProperty("triggerPhrase", triggerPhrase);
-		json.addProperty("thinkingAck", thinkingAck);
 		json.addProperty("publicReplies", publicReplies);
-		json.addProperty("sentMemory", sentMemory);
 		return json;
 	}
 
@@ -120,55 +105,21 @@ public final class BridgeConfig {
 						|| !(uri.getScheme().equals("http") || uri.getScheme().equals("https"))) {
 					throw new IllegalArgumentException("middlewareBase must be an http(s) URL");
 				}
-				return replace(value, triggerPhrase, thinkingAck, publicReplies, sentMemory);
-			}
-			case "triggerPhrase" -> {
-				requireNonEmpty(key, value);
-				return replace(middlewareBase, value, thinkingAck, publicReplies, sentMemory);
-			}
-			case "thinkingAck" -> {
-				requireNonEmpty(key, value);
-				return replace(middlewareBase, triggerPhrase, value, publicReplies, sentMemory);
+				return new BridgeConfig(value, publicReplies);
 			}
 			case "publicReplies" -> {
-				boolean parsed = parseBoolean(key, value);
-				return replace(middlewareBase, triggerPhrase, thinkingAck, parsed, sentMemory);
-			}
-			case "sentMemory" -> {
-				int parsed = parseInt(key, value);
-				if (parsed < 1) {
-					throw new IllegalArgumentException("sentMemory must be >= 1");
-				}
-				return replace(middlewareBase, triggerPhrase, thinkingAck, publicReplies, parsed);
+				return new BridgeConfig(middlewareBase, parseBoolean(key, value));
 			}
 			default -> throw new IllegalArgumentException("unknown key: " + key);
 		}
-	}
-
-	private BridgeConfig replace(String middlewareBase, String triggerPhrase, String thinkingAck,
-			boolean publicReplies, int sentMemory) {
-		return new BridgeConfig(middlewareBase, triggerPhrase, thinkingAck,
-				publicReplies, sentMemory);
 	}
 
 	public String middlewareBase() {
 		return middlewareBase;
 	}
 
-	public String triggerPhrase() {
-		return triggerPhrase;
-	}
-
-	public String thinkingAck() {
-		return thinkingAck;
-	}
-
 	public boolean publicReplies() {
 		return publicReplies;
-	}
-
-	public int sentMemory() {
-		return sentMemory;
 	}
 
 	private static String readOrNull(Path path) {
@@ -204,19 +155,6 @@ public final class BridgeConfig {
 		return json.get(key).getAsBoolean();
 	}
 
-	private static int requiredInt(JsonObject json, String key) {
-		if (json == null || !json.has(key) || json.get(key).isJsonNull()) {
-			throw new JsonParseException("config is missing required key: " + key);
-		}
-		return json.get(key).getAsInt();
-	}
-
-	private static void requireNonEmpty(String key, String value) {
-		if (value == null || value.isBlank()) {
-			throw new IllegalArgumentException(key + " must not be empty");
-		}
-	}
-
 	private static URI parseUri(String value) {
 		try {
 			return URI.create(value);
@@ -233,13 +171,5 @@ public final class BridgeConfig {
 			return false;
 		}
 		throw new IllegalArgumentException(key + " must be true or false");
-	}
-
-	private static int parseInt(String key, String value) {
-		try {
-			return Integer.parseInt(value);
-		} catch (NumberFormatException err) {
-			throw new IllegalArgumentException(key + " must be a whole number");
-		}
 	}
 }

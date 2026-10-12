@@ -15,18 +15,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
 
 /**
  * The middleware↔mod channel — the mod's ONLY network surface (contract
- * v3; java.net.http.WebSocket, JDK built-in, no new dependencies).
+ * v4; java.net.http.WebSocket, JDK built-in, no new dependencies).
  * Connects at {middlewareBase}/api/ws and routes every valid inbound frame
  * to the display sink on the client thread — never calls Minecraft APIs
  * from the WS thread. Pure frame logic lives here too (static,
  * unit-tested):
  *
- *  - inbound: {"text": str, "mode": "local"|"public"}, mode optional
- *    (default local), unknown modes drop the frame
+ *  - inbound: {"text": str, "mode": "local"|"public"|"localStream"}, mode
+ *    optional (default local), unknown modes drop the frame
  *  - outbound: {"type": "chat", "sender": str, "message": str}, one per
  *    chat line, fire-and-forget (dropped while disconnected)
  *
@@ -36,12 +35,23 @@ import java.util.function.BiConsumer;
  *  - stop() ends the channel for good (the game is shutting down)
  */
 public final class WsChannel implements WebSocket.Listener {
-	/** Displays a decoded push on the client thread (implementations handle null-bridge). */
-	public interface PushSink extends BiConsumer<String, Boolean> {
+	/** How a pushed message is displayed (contract v4 push frames). */
+	public enum Mode {
+		/** Echo into the local HUD only. */
+		LOCAL,
+		/** Sent to the server as the player when publicReplies is on. */
+		PUBLIC,
+		/** Streaming chunk: accumulates into ONE local HUD line, in place. */
+		LOCAL_STREAM
 	}
 
-	/** A decoded push: display locally or send to the server as the player. */
-	public record Push(String text, boolean isPublic) {
+	/** Displays a decoded push on the client thread (implementations handle null-bridge). */
+	public interface PushSink {
+		void accept(Push push);
+	}
+
+	/** A decoded push: display text + how to display it. */
+	public record Push(String text, Mode mode) {
 	}
 
 	/** Backoff ladder: 1, 2, 4, 8, 15, 30 (then 30, 30, ...). */
@@ -107,20 +117,22 @@ public final class WsChannel implements WebSocket.Listener {
 		if (text == null || text.isBlank()) {
 			return null;
 		}
-		boolean isPublic;
+		Mode mode;
 		if (json.has("mode") && !json.get("mode").isJsonNull()) {
-			String mode = json.get("mode").getAsString();
-			if ("public".equals(mode)) {
-				isPublic = true;
-			} else if ("local".equals(mode)) {
-				isPublic = false;
+			String value = json.get("mode").getAsString();
+			if ("public".equals(value)) {
+				mode = Mode.PUBLIC;
+			} else if ("local".equals(value)) {
+				mode = Mode.LOCAL;
+			} else if ("localStream".equals(value)) {
+				mode = Mode.LOCAL_STREAM;
 			} else {
 				return null;
 			}
 		} else {
-			isPublic = false;
+			mode = Mode.LOCAL;
 		}
-		return new Push(text, isPublic);
+		return new Push(text, mode);
 	}
 
 	/**
@@ -205,8 +217,8 @@ public final class WsChannel implements WebSocket.Listener {
 			Push push = parse(frame);
 			if (push != null) {
 				// Hop onto the client thread before touching any Minecraft API.
-				sink.accept(push.text(), push.isPublic());
-				log.debug("ws push: mode={} text={}", push.isPublic() ? "public" : "local", push.text());
+				sink.accept(push);
+				log.debug("ws push: mode={} text={}", push.mode(), push.text());
 			} else {
 				log.info("ws: ignoring malformed push frame ({} bytes)", frame.length());
 			}

@@ -4,6 +4,7 @@
 	"package": "com.messagetriggers.e2e.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"ChatHudAccessor",
 		"ChatRecorderMixin"
 	],
 	"injectors": {

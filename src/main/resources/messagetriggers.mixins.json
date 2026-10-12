@@ -4,6 +4,8 @@
 	"package": "com.messagetriggers.mod.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"ChatHudAccessor",
+		"ChatHudInvoker",
 		"ChatHudMixin"
 	],
 	"injectors": {
