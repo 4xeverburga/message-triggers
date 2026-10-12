@@ -5,9 +5,10 @@
 # Spawns a REAL Minecraft client (Fabric dev env via Loom's runClient) with
 # ONLY the message-triggers mod loaded, joins a local vanilla server, injects
 # scripted chat lines through the real ChatHud injection point, and asserts
-# that the bridge one-way POSTs them to a stub middleware and that replies
-# arrive via the /api/ws push channel into the HUD. The driver mod writes
-# the verdict to e2e/run/e2e-result.json and stops the client itself.
+# that the bridge forwards them as {"type": "chat"} frames over the /api/ws
+# WebSocket (the mod has NO HTTP) and that replies arrive as WS push frames
+# into the HUD. The driver mod writes the verdict to e2e/run/e2e-result.json
+# and stops the client itself.
 #
 # Layout:
 #   e2e/stub-middleware.py — deterministic /api/chat stub (port 32100)
@@ -76,15 +77,15 @@ for port in "$STUB_PORT" "$SERVER_PORT"; do
 	fi
 done
 
-# ── 0. harness requirements: aiohttp (stub = HTTP POST + WS push) ─────────
+# ── 0. harness requirements: aiohttp (stub = the one /api/ws channel) ─────
 if ! python3 -c "import aiohttp" 2>/dev/null; then
 	echo "[e2e] ERROR: the stub needs aiohttp — install it with: python3 -m pip install aiohttp"
 	exit 1
 fi
 
 # ── 1. run dir + bridge config (publicReplies=true so the harness exercises
-#       the real public path: replies and ws public pushes go to the server
-#       and come back as the player's chat) ─────────────────────────────────
+#       the real public path: pushed replies are sent to the server AS the
+#       player and echo back as chat frames) ─────────────────────────────
 mkdir -p "$RUN_DIR/config/messagetriggers"
 rm -f "$RUN_DIR/e2e-result.json" "$RUN_DIR/stub-requests.jsonl"
 cat > "$RUN_DIR/config/messagetriggers/bridge.json" <<EOF
@@ -92,10 +93,8 @@ cat > "$RUN_DIR/config/messagetriggers/bridge.json" <<EOF
   "middlewareBase": "http://127.0.0.1:$STUB_PORT",
   "triggerPhrase": "@bot",
   "thinkingAck": "...thinking...",
-  "failureMessage": "Message Triggers failed to answer.",
   "publicReplies": true,
-  "sentMemory": 16,
-  "wsEnabled": true
+  "sentMemory": 16
 }
 EOF
 

@@ -32,7 +32,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 		configPath = FabricLoader.getInstance().getConfigDir()
 				.resolve("messagetriggers")
 				.resolve("bridge.json");
-		bridge = Bridge.load(configPath);
+		bridge = Bridge.load(configPath, MessageTriggersMod::onOutgoingChat);
 		if (bridge == null) {
 			LOGGER.error("bridge config could not be loaded (defaults resource unreadable) at {}", configPath);
 			return;
@@ -72,7 +72,7 @@ public final class MessageTriggersMod implements ClientModInitializer {
 				source.sendFeedback(Text.literal("could not save " + configPath + ": " + err));
 				return 0;
 			}
-			bridge = Bridge.fromConfig(result.config());
+			bridge = Bridge.fromConfig(result.config(), MessageTriggersMod::onOutgoingChat);
 			LOGGER.info("config updated via /mtriggers: {}", result.feedback().replace('\n', ';'));
 			reconnectWsChannel(result.config());
 		}
@@ -81,18 +81,16 @@ public final class MessageTriggersMod implements ClientModInitializer {
 	}
 
 	/**
-	 * Stops the current push channel (if any) and starts a new one when the
-	 * config says so — middlewareBase and wsEnabled both take effect at
-	 * set-time without a restart.
+	 * Reconnects the WS channel when the config changes — routing bridge
+	 * swaps replace the bridge (same outbox wiring), and a changed
+	 * middlewareBase means the channel must point at the new origin at
+	 * set-time without a restart. The channel itself is ALWAYS on: it is
+	 * the mod's only network surface (contract v3).
 	 */
 	private static void reconnectWsChannel(BridgeConfig config) {
 		if (wsChannel != null) {
 			wsChannel.stop();
 			wsChannel = null;
-		}
-		if (!config.wsEnabled()) {
-			LOGGER.info("ws push channel disabled (enable via /mtriggers set wsEnabled true)");
-			return;
 		}
 		wsChannel = new WsChannel(config.middlewareBase(), LOGGER, MessageTriggersMod::onPush);
 		wsChannel.start();
@@ -113,6 +111,16 @@ public final class MessageTriggersMod implements ClientModInitializer {
 				bridge.pushLocal(text);
 			}
 		});
+	}
+
+	/**
+	 * Outbox for the bridge (called on the client thread): sends a chat
+	 * line over the current WS channel; dropped when disconnected.
+	 */
+	private static void onOutgoingChat(String sender, String message) {
+		if (wsChannel != null) {
+			wsChannel.sendChat(sender, message);
+		}
 	}
 
 	/** Called by the chat mixin for every chat line rendered in the HUD. */

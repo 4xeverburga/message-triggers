@@ -1,27 +1,25 @@
-# Message Triggers — middleware contract v2 (for middleware / agent developers)
+# Message Triggers — middleware contract v3 (for middleware / agent developers)
 
-This is everything a middleware (the HTTP side) developer needs to know to
-talk to the Message Triggers mod. Two surfaces exist, both on your
-`middlewareBase` origin:
+This is everything a middleware developer needs to know to talk to the
+Message Triggers mod. ONE surface exists, both directions on the same
+WebSocket on your `middlewareBase` origin:
 
-- `POST /api/chat` — one-way notification: what your (the user's) Minecraft
-  client renders as chat, one POST per line. **The response body is never
-  read.**
-- `GET /api/ws` — WebSocket push channel: the **only** way anything (trigger
-  replies, busy/timeout notices, proactive pings) reaches the player.
+- `GET /api/ws` — the single bidirectional channel. Chat lines travel
+  client→server as `{"type": "chat", ...}` frames; answers, notices and
+  proactive pings travel server→client as `{"text", "mode"}` frames.
+- **There is no HTTP.** The legacy `POST /api/chat` endpoint is deleted
+  (contract v2 and earlier); the mod never makes an HTTP request.
 
-### v2 — breaking changes from v1
+### v3 — breaking changes from v2
 
-- **`{"reply": ...}` in the POST response is gone.** The mod ignores the
-  response body entirely; a middleware that still answers over HTTP will
-  look dead to the player. All answers are WS pushes now.
-- **The status-code signaling convention (200/429/504/502 semantics) is
-  retired.** What the player sees instead is whatever you push, whenever
-  you push it.
-- **`wsEnabled` defaults to `true`** (it used to additively opt into the
-  push channel; now the push channel *is* the reply path). Only configs
-  that predate the field default on — old explicit `false` still disables
-  replies.
+- **`POST /api/chat` is gone.** The mod forwards chat as
+  `{"type": "chat", ...}` frames on the same socket it listens to, and it
+  never queues outbound frames client-side — when the socket is down,
+  traffic is dropped; that is by design (same reliability rules as
+  pushes, §2).
+- **`failureMessage` and `wsEnabled` tunables are gone.** All
+  middleware→player messaging is pushed; the client-side "the trigger
+  never reached you" failure path existed only for HTTP.
 
 ## 0. Deployment model: one client, one user, no server install
 
@@ -46,158 +44,144 @@ client — for-the-user, by-the-user. There is **no server-side component**:
 
 ```
 Your Minecraft client (mod installed, nothing server-side)
-        │  POST /api/chat      every chat line YOUR client renders (one-way)
+        │  WS {"type": "chat"} frames     every chat line YOUR client renders
         ▼
 Middleware (your side)  →  consumes, processes, decides what to say
-        │  WS frames {"text", "mode"}   answers via /api/ws, any time
+        │  WS {"text", "mode"} frames    answers/pings, any time
         ▼
 Mod shows it: local echo, or sent to the server AS YOU
 ```
 
-## 1. `POST {middlewareBase}/api/chat` — one-way chat notification
+## 1. The single channel: `GET {middlewareBase}/api/ws`
 
 - `middlewareBase` is user-configured (default `http://127.0.0.1:3000`,
-  typically a localhost service). The mod appends the literal path
-  `/api/chat` — it is not configurable.
-- Headers: `Content-Type: application/json`. No auth headers — trust model
-  is "localhost loopback"; design your middleware deployment accordingly
-  (bind to `127.0.0.1`, don't expose it to the LAN).
-- **Response: return something fast (`202` with any body is idiomatic) and
-  get out of the way.** The mod reads nothing from it: not the body, not
-  the status code. There is no retry either — a network-level failure is
-  logged and, for trigger messages, is the only failure the mod can detect
-  (see §2).
+  typically a localhost service; `http→ws`, `https→wss`). The mod appends
+  the literal path `/api/ws` — it is not configurable.
+- No auth headers — trust model is "localhost loopback"; design your
+  middleware deployment accordingly (bind to `127.0.0.1`, don't expose it
+  to the LAN).
+- The mod connects at boot and reconnects **indefinitely with exponential
+  backoff (1s → 30s)**, so serving nothing to it is a supported steady
+  state — but a middleware that wants *anything* answered or forwarded
+  must serve it.
+- One frame, one unit of work, both directions below.
 
-### Request payload
+### Client → server: chat frames
 
 ```json
-{"sender": "E2ETester", "message": "@bot how do I get to the nether?"}
+{"type": "chat", "sender": "E2ETester", "message": "@bot how do I get to the nether?"}
 ```
 
 | Field     | Type   | Notes |
 |-----------|--------|-------|
+| `type`    | string | Always `"chat"` in v3 |
 | `sender`  | string | Whoever typed the line: the mod owner, another player in the session, or the echo of a message the mod sent (see §3). Do **not** assume `sender` is the client's user |
 | `message` | string | The message text without the `<sender> ` prefix. May contain newlines (multi-line chat is captured as one line with `\n`) and any UTF-8 the game renders |
 
-The mod captures every line **the configured client** renders as player
-chat — vanilla renders a player chat line as `<sender> message`; system
-messages, join/leave notices, etc. are ignored. One capture = exactly one
-POST. So the stream naturally includes other players' chatter (that's the
-history part of the design: the agent sees the whole conversation the user
-sees), while *decisions* — what counts as a trigger — are made only on what
-the user addresses to it.
+Rules:
 
-Trigger messages (default trigger: `@bot`, configurable) are additionally
-marked client-side with a local `...thinking...` ack — invisible to you,
-and no timeout follows it client-side: the player then waits for you to
-**push** an answer (§2). If you never push, the ack just sits there, so
-always push *something* for a trigger you see (the answer, a busy note, a
-timeout note).
+- The mod captures every line **the configured client** renders as player
+  chat — vanilla renders a player chat line as `<sender> message`; system
+  messages, join/leave notices, etc. are not forwarded. Since this is now
+  a single stream over one socket, ordering is socket order — no
+  reordering is possible end-to-end (v2's HTTP-response race is moot).
+- **Fire-and-forget, no frame-level retries**: while disconnected the mod
+  *drops* chat frames (transition gaps during a reconnect ladder lose
+  lines). The mod is not your durable transport — the middleware's
+  working set of "what chat order and coverage it needs" is yours to
+  design (e.g. also ingest from other sources, or reconnect-gap
+  compensation in your agent logic).
+- The mod identifies trigger messages client-side ONLY for local
+  decoration (a `...thinking...` ack when `message` starts with the
+  configured `triggerPhrase`, default `@bot`). You decide what a trigger
+  needs from you: push *something* for it — the answer, a busy note, a
+  timeout note — because the player sees only that ack and then silence
+  until you push.
 
-## 2. `GET {middlewareBase}/api/ws` — WebSocket push channel (required)
+### Server → client: push/answer frames
 
-This is where all answers travel. The mod connects at boot (when
-`wsEnabled`, the default) and reconnects **indefinitely with exponential
-backoff (1s → 30s)**, so serving nothing to it is a supported steady state —
-but a middleware that wants *triggers answered* must serve it.
+```json
+{"text": "the agent answered something", "mode": "public"}
+```
 
-### Protocol rules
+| Field  | Type   | Notes                                                                      |
+|--------|--------|----------------------------------------------------------------------------|
+| `text` | string | The message to display; blank text frames are silently dropped             |
+| `mode` | string | `local` (default) → shown only to the player; `public` → posted to the server as the player. **Anything else drops the frame** — the mode names are exact and case-sensitive |
 
-- The mod **listens only** — it sends nothing on this socket, ever.
-- Frames: one JSON object per **text frame**:
+Unknown JSON fields are ignored for forward compatibility.
 
-  ```json
-  {"text": "the agent answered something", "mode": "public"}
-  ```
+- **Correlating replies to triggers is your job** (there is no
+  request/response pairing on the socket). The trigger frame mainly
+  arrives at most seconds before its answer should be pushed; use the
+  history you ingested (you own both ends of the correlation).
+- The mod **must not be trusted with reliability** of pushes either: the
+  transport is fire-and-forget from your side. If your middleware
+  restarts or the player alt-tabs through a network flap,
+  queue-and-discipline your messages there; the reconnecting client means
+  you do NOT need to gate app behavior on push delivery.
 
-  | Field  | Type   | Notes                                                                      |
-  |--------|--------|----------------------------------------------------------------------------|
-  | `text` | string | The message to display; blank text frames are silently dropped             |
-  | `mode` | string | `local` (default) → shown only to the player; `public` → posted to the server as the player. **Anything else drops the frame** — the mode names are exact and case-sensitive |
+## 2. Reliability (both directions)
 
-  Unknown JSON fields are ignored for forward compatibility.
-- The mod **must not be trusted with reliability**: the transport is
-  fire-and-forget from your side. If your middleware restarts or the player
-  alt-tabs through a network flap, queue-and-discipline your messages
-  there; the reconnecting client means you do NOT need to gate app
-  behavior on push delivery.
-- **Correlating replies to triggers is your job** (the socket carries no
-  request/response pairing in v2). The trigger POST arrives at most seconds
-  before its answer should be pushed; use the history you ingested.
+- Neither side retries. Frames that did not make it during a disconnect
+  are lost, period.
+- This is deliberate: the mod is a one-user, one-session toy surface for
+  your agent, not a messaging system. Queue what matters (full report
+  text, alerts), skip what doesn't (stream chatter). Both directions are
+  symmetric fire-and-forget; if you need guarantees, treat the WS as a
+  notification rail and build durability in your middleware.
+- Liveness: no heartbeats at all on either channel; gauge liveness from
+  frame activity or a closed session.
 
-### Display rules
+## 3. Feedback loop (why you'll see your own messages as chat frames)
 
-- `publicReplies=true` (default): a `public` frame is sent to the Minecraft
-  server **as the player**, so everyone in chat sees it. Consequences:
-  - Split into lines yourself (`\n`); each line becomes one chat message.
-    Each line **must be ≤ 256 chars** (Minecraft's per-message chat
-    limit) — enforce this centrally in your push layer.
-  - The server echoes those lines back to the client, and the mod re-POSTs
-    them (they re-enter the history stream, see §3). Keep pushed texts free
-    of character sequences that look like they were written by the agent —
-    they'll be indistinguishable from real chat in your history.
-  - A `public` push that arrives before a world is joined (title screen —
-    the socket connects at boot) degrades to a local echo, never a crash
-    or a lost message.
-- `publicReplies=false`: everything lands as a local echo (nobody else sees
-  it), regardless of `mode`.
-- The thinking ack is always local-only; never expect to see it server-side.
-
-## 3. Feedback loop (why you'll see your own messages as POSTs)
-
-When a pushed message is displayed, the server echoes it back to the client
-as normal chat (`<player> your message text`), and the mod POSTs that echo
-like any other chat line — replies therefore land in your history stream.
-Two guarantees you can rely on:
+When a pushed message is displayed, the server echoes it back to the
+client as normal chat (`<player> your message text`), and the mod forwards
+that echo like any other chat frame — replies therefore land in your
+history stream. Two guarantees you can rely on:
 
 1. **Never treated as triggers**: the mod remembers the lines it sent
-   (rolling buffer, `sentMemory`, default 16) and an echo of one of them can
-   never trigger — even if the text happens to start with the trigger
-   phrase. The bot cannot accidentally talk to itself.
-2. **History only**: an echo POST is not an expectation of an answer —
+   (rolling buffer, `sentMemory`, default 16) and an echo of one of them
+   can never produce the client-side thinking ack — even if the text
+   happens to start with the trigger phrase. The bot cannot accidentally
+   talk to itself.
+2. **History only**: an echo frame is not an expectation of an answer —
    pushing a reply to every echo you see is wasted work (and a loop).
 
 ## 4. What the mod never does
 
-- No batching: one HTTP request per chat line, in arrival order.
-- No retries: a failed POST is logged (and surfaces the configured failure
-  message for triggers). Idempotency is on you if you retry.
-- No polling, no server socket, no health route: the only inbound
-  connection is the mod's own **outgoing** WebSocket (§2). There are no
-  heartbeats on either channel; gauge liveness from activity or a closed
-  session.
-- No retries of pushes either: what arrives is displayed once; missing
-  frames are your queue's problem.
-- No game-control surface: the mod never sends commands, moves the player,
-  or reads inventory/position — its only effect on the game is putting text
-  into (or out of) the chat. If your agent needs to act inside the game,
-  that is a different, server-side integration; this mod is intentionally
-  not it.
-- No correlation protocol: the WS channel carries plain display frames. If
-  you need request/response pairing, correlate in your middleware (you own
-  both the chat history and the push).
+- No HTTP: no POST, no health route, no polling, no server socket. WS
+  only.
+- No batching: one chat frame per chat line, in arrival order.
+- No retries on either channel (§2).
+- No game-control surface: the mod never sends commands, moves the
+  player, or reads inventory/position — its only effects on the game are
+  chat text in (push) and chat text out (frame forwarding). If your agent
+  needs to act inside the game, that is a different, server-side
+  integration; this mod is intentionally not it.
+- No correlation protocol: the socket carries plain display/chat frames.
+  If you need request/response pairing, correlate in your middleware (you
+  own both the chat history and the push).
 
 ## 5. Tunables that affect your side (`/mtriggers`, persisted to `bridge.json`)
 
-| Key              | Default                              | Effect on you |
-|------------------|--------------------------------------|---------------|
-| `middlewareBase` | `http://127.0.0.1:3000`              | Base URL you will be posted to (and the origin of the WS push channel) |
-| `triggerPhrase`  | `@bot`                               | The message prefix that marks a trigger (you must still push an answer for it) |
-| `thinkingAck`    | `...thinking...`                     | Local-only ack text (invisible to you) |
-| `failureMessage` | `Message Triggers failed to answer.` | Shown only when the POST itself fails at the network level (the trigger never reached you) — agent slowness is YOUR job to announce |
-| `publicReplies`  | `true`                               | Whether pushed public messages go to the server (see §2) |
-| `sentMemory`     | `16`                                 | Size of the echo-guard buffer (see §3) |
-| `wsEnabled`      | `true`                               | Whether the mod connects the push channel at all (§2). `false` = no answers ever reach the player |
+| Key             | Default                              | Effect on you |
+|-----------------|--------------------------------------|---------------|
+| `middlewareBase`| `http://127.0.0.1:3000`              | Origin you will be connected to (frames both ways) |
+| `triggerPhrase` | `@bot`                               | The message prefix that makes the mod show its local thinking ack (the answer itself is your push, unprompted by you) |
+| `thinkingAck`   | `...thinking...`                     | Local-only ack text (invisible to you) |
+| `publicReplies` | `true`                               | Whether pushed public messages go to the server (see §1 push frames) |
+| `sentMemory`    | `16`                                 | Size of the echo-guard buffer (see §3) |
 
 ## 6. Testing your middleware against the mod
 
 - `e2e/stub-middleware.py` is a ~80-line reference implementation of this
-  contract (one-way `202` for every POST; tagged triggers queue a reply
-  that is pushed as a `public` frame; every request appended to a JSONL
-  log). Copy it as the scaffold for a real middleware or as a mock for
-  interactive testing.
-- `e2e/run-e2e.sh` boots a real Minecraft client against the vanilla server
-  and drives chat through it — the doc for each check is `e2e/README.md`.
+  contract (one WS endpoint: logs inbound chat frames to JSONL, queues a
+  reply for a tagged trigger, pushes it as a `public` frame). Copy it as
+  the scaffold for a real middleware or as a mock for interactive testing.
+- `e2e/run-e2e.sh` boots a real Minecraft client against the vanilla
+  server and drives chat through it — the doc for each check is
+  `e2e/README.md`.
 - Fastest interactive loop: start the stub locally, point a Minecraft
   instance at it (`/mtriggers set middlewareBase http://127.0.0.1:32100`),
   and chat.
@@ -206,14 +190,14 @@ Two guarantees you can rely on:
 
 A middleware is contract-compatible when it:
 
-- [ ] accepts `POST /api/chat` with `Content-Type: application/json`
-      payload `{"sender": str, "message": str}` and returns *some* fast
-      response (a `202` is idiomatic) whose body is never read
-- [ ] serves `GET /api/ws` as a WebSocket endpoint (required for any
-      useful behavior beyond history ingestion; a connection refused is
-      tolerated forever by the mod, but nothing reaches the player then)
+- [ ] serves `GET /api/ws` as a WebSocket endpoint (the ONLY endpoint the
+      mod touches; a connection refused is tolerated forever by the mod,
+      but nothing is forwarded or answered then)
+- [ ] parses inbound frames `{"type": "chat", "sender": str, "message": str}`
+      (unknown client frame shapes may appear in the future — ignore what
+      has no `type: "chat"`)
 - [ ] pushes only `{"text": str, "mode": "local"|"public"}` frames and
-      tolerates the client never sending anything back
+      tolerates the client sending nothing back for them
 - [ ] pushes **some** message for every trigger it sees (the player sees
       only the thinking ack until you do)
 - [ ] keeps every pushed line ≤ 256 chars if `publicReplies` can be on

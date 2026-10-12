@@ -24,8 +24,9 @@ means only:
    Fabric/mixin code and may need adjusting for older targets.
 
 Scope: **message-triggers only**. The middleware is a deterministic stub
-(`stub-middleware.py`, port 32100) implementing contract v2 (`/api/chat`
-one-way posts + `/api/ws` reply pushes); the MemoChat mod is NOT loaded.
+(`stub-middleware.py`, port 32100) implementing contract v3 — the single
+bidirectional `/api/ws` channel (chat in, pushes out), no HTTP at all; the
+MemoChat mod is NOT loaded.
 
 ## Run it
 
@@ -48,8 +49,7 @@ caches). Later runs take ~2 minutes.
 | failure reply pushed via ws | the stub's failure case travels the same push path |
 | ws local push in HUD | the stub's `mode: local` connect frame appears |
 | ws public push in HUD | the stub's `mode: public` ping goes to the server and is echoed back |
-| untagged line reached middleware | one-way POST happened |
-| tagged / failure lines reached middleware | payloads carry sender + message |
+| chat frames reached middleware | the injected lines are forwarded as `{"type": "chat"}` WS frames over the same `/api/ws` socket (untagged, tagged, failure and sender logged by the stub) |
 
 The driver mod (`e2edriver`) records every HUD line via a mixin on the same
 `ChatHud#addMessage` overload the production `ChatHudMixin` hooks, injects

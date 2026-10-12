@@ -9,8 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Contract tests for the pure chat-line logic (no Minecraft classes).
- * Scenarios mirror the middleware contract (contracts/api.md) and the
- * old ChatTriggers module behavior.
+ * Scenarios mirror the middleware contract (docs/middleware-contract.md).
  */
 class ChatLineParserTest {
 	@Test
@@ -44,16 +43,5 @@ class ChatLineParserTest {
 		assertTrue(ChatLineParser.isTrigger("@bot", "@bot"));
 		assertFalse(ChatLineParser.isTrigger("hello @bot", "@bot"));
 		assertFalse(ChatLineParser.isTrigger("@botx hi", "@bot ")); // phrase includes trailing space
-	}
-
-	@Test
-	void buildsPayloadJsonWithEscaping() {
-		assertEquals("{\"sender\":\"4verburg\",\"message\":\"@bot hello\"}",
-				ChatLineParser.buildPayloadJson("4verburg", "@bot hello"));
-		// Quotes, backslashes and newlines must survive round-tripping.
-		String json = ChatLineParser.buildPayloadJson("alice", "say \"hi\" \\ o/\nnice");
-		String[] parsed = ChatLineParser.parse("<alice> say \"hi\" \\ o/\nnice");
-		assertEquals("{\"sender\":\"alice\",\"message\":\"say \\\"hi\\\" \\\\ o/\\nnice\"}", json);
-		assertEquals("alice", parsed[0]);
 	}
 }

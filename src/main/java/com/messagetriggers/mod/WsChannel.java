@@ -18,21 +18,22 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
 /**
- * The middleware→mod push channel (java.net.http.WebSocket; JDK built-in,
- * no new dependencies). Listens at {middlewareBase}/api/ws and routes every
- * valid frame to the display sink on the client thread — never calls
- * Minecraft APIs from the WS thread. Pure frame parsing lives here too
- * (static, unit-tested): {"text": str, "mode": "local"|"public"}, mode
- * optional (default local), unknown modes NON-canonical values drop the frame.
+ * The middleware↔mod channel — the mod's ONLY network surface (contract
+ * v3; java.net.http.WebSocket, JDK built-in, no new dependencies).
+ * Connects at {middlewareBase}/api/ws and routes every valid inbound frame
+ * to the display sink on the client thread — never calls Minecraft APIs
+ * from the WS thread. Pure frame logic lives here too (static,
+ * unit-tested):
+ *
+ *  - inbound: {"text": str, "mode": "local"|"public"}, mode optional
+ *    (default local), unknown modes drop the frame
+ *  - outbound: {"type": "chat", "sender": str, "message": str}, one per
+ *    chat line, fire-and-forget (dropped while disconnected)
  *
  * Semantics:
- *  - listen-only: the mod sends nothing on this socket, ever
  *  - auto-reconnect with exponential backoff (1s → 30s cap) that resets on
  *    a successful open, and one connect attempt at a time
  *  - stop() ends the channel for good (the game is shutting down)
- *
- * Since v2 this is the mod's ONLY inbound reply path — trigger replies,
- * busy/timeout notices and proactive pings all arrive as frames here.
  */
 public final class WsChannel implements WebSocket.Listener {
 	/** Displays a decoded push on the client thread (implementations handle null-bridge). */
@@ -120,6 +121,38 @@ public final class WsChannel implements WebSocket.Listener {
 			isPublic = false;
 		}
 		return new Push(text, isPublic);
+	}
+
+	/**
+	 * Serializes an outbound chat frame: {"type": "chat", "sender", "message"}.
+	 * One frame per chat line; control characters are escaped by Gson.
+	 */
+	static String buildChatFrame(String sender, String message) {
+		JsonObject frame = new JsonObject();
+		frame.addProperty("type", "chat");
+		frame.addProperty("sender", sender);
+		frame.addProperty("message", message);
+		return GSON.toJson(frame);
+	}
+
+	/**
+	 * Forwards a chat line to the middleware, fire-and-forget: when the
+	 * socket is not connected the line is dropped and logged (the mod never
+	 * queues — see the contract's reliability rules, both directions).
+	 * Called on the client thread; sendText is safe from any thread.
+	 */
+	void sendChat(String sender, String message) {
+		WebSocket ws = socket.get();
+		if (ws == null) {
+			log.debug("ws: chat line dropped (not connected): <{}> {}", sender, message);
+			return;
+		}
+		ws.sendText(buildChatFrame(sender, message), true)
+				.whenComplete((unused, err) -> {
+					if (err != null) {
+						log.info("ws: chat line send failed: {}", rootCause(err));
+					}
+				});
 	}
 
 	void start() {

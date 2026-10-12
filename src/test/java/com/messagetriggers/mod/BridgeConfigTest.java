@@ -32,10 +32,8 @@ class BridgeConfigTest {
 		assertEquals("http://127.0.0.1:3000", config.middlewareBase());
 		assertEquals("@bot", config.triggerPhrase());
 		assertEquals("...thinking...", config.thinkingAck());
-		assertEquals("Message Triggers failed to answer.", config.failureMessage());
 		assertEquals(true, config.publicReplies());
 		assertEquals(16, config.sentMemory());
-		assertEquals(true, config.wsEnabled());
 	}
 
 	@Test
@@ -46,7 +44,6 @@ class BridgeConfigTest {
 					"middlewareBase": "http://127.0.0.1:9999",
 					"triggerPhrase": "@ask",
 					"thinkingAck": "one sec",
-					"failureMessage": "no answer",
 					"publicReplies": false,
 					"sentMemory": 32
 				}
@@ -55,38 +52,8 @@ class BridgeConfigTest {
 		assertEquals("http://127.0.0.1:9999", config.middlewareBase());
 		assertEquals("@ask", config.triggerPhrase());
 		assertEquals("one sec", config.thinkingAck());
-		assertEquals("no answer", config.failureMessage());
 		assertEquals(false, config.publicReplies());
 		assertEquals(32, config.sentMemory());
-	}
-
-	@Test
-	void wsEnabledIsOptionalAndDefaultsToTrue() throws IOException {
-		Path file = tempDir.resolve("bridge.json");
-		Files.writeString(file, """
-				{
-					"middlewareBase": "http://127.0.0.1:3000",
-					"triggerPhrase": "@ask",
-					"thinkingAck": "one sec",
-					"failureMessage": "no answer",
-					"publicReplies": true,
-					"sentMemory": 16
-				}
-				""");
-		// Absent means true: the push channel is the only reply path (v2).
-		assertEquals(true, BridgeConfig.load(file).wsEnabled());
-		Files.writeString(file, """
-				{
-					"middlewareBase": "http://127.0.0.1:3000",
-					"triggerPhrase": "@ask",
-					"thinkingAck": "one sec",
-					"failureMessage": "no answer",
-					"publicReplies": true,
-					"sentMemory": 16,
-					"wsEnabled": true
-				}
-				""");
-		assertEquals(true, BridgeConfig.load(file).wsEnabled());
 	}
 
 	@Test
@@ -137,11 +104,9 @@ class BridgeConfigTest {
 		assertEquals(false, base.with("publicReplies", "false").publicReplies());
 		assertEquals("@ask me", base.with("triggerPhrase", "@ask me").triggerPhrase());
 		assertEquals("http://localhost:1234", base.with("middlewareBase", "http://localhost:1234").middlewareBase());
-		assertEquals(true, base.with("wsEnabled", "true").wsEnabled());
-		assertEquals(false, base.with("wsEnabled", "false").wsEnabled());
 		// original is never mutated
 		assertEquals(16, base.sentMemory());
-		assertEquals(true, base.wsEnabled());
+		assertEquals(true, base.publicReplies());
 	}
 
 	@Test

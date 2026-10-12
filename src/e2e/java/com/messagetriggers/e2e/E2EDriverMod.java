@@ -26,10 +26,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * chat line rendered in the HUD (via ChatRecorderMixin — the SAME injection
  * point the production ChatHudMixin uses, so what it sees is what the bridge
  * sees), then after joining the local vanilla server it injects scripted
- * chat lines and asserts the full round trip (contract v2 — all answers
- * travel the WS push channel; the POST response body is never read):
+ * chat lines and asserts the full round trip over the ONE channel (contract
+ * v3; the mod does not speak HTTP at all):
  *
- *   untagged line   → one-way POST /api/chat → 202 logged (stub request log)
+ *   untagged line   → {"type": "chat"} WS frame → logged by the stub
  *   tagged line     → thinking ack in HUD → stub queues a reply → WS push
  *                     (public mode) → sent to the server AS the player →
  *                     echoed back into the HUD
@@ -169,7 +169,7 @@ public final class E2EDriverMod implements ClientModInitializer {
 		MinecraftClient.getInstance().inGameHud.getChatHud().addMessage(Text.literal(line));
 	}
 
-	/** Middleware-side assertions against the stub's request log. */
+	/** Middleware-side assertions against the stub's frame log. */
 	private boolean verify(List<Check> checks) {
 		Path stubLog = FabricLoader.getInstance().getGameDir().resolve("stub-requests.jsonl");
 		String content = readOrNull(stubLog);
