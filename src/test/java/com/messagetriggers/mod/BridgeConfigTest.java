@@ -62,6 +62,7 @@ class BridgeConfigTest {
 		Files.writeString(file, "{\"middlewareBase\": \"http://127.0.0.1:3000\"}");
 		BridgeConfig config = BridgeConfig.load(file);
 		assertNotNull(config);
+		// A missing required key discards the whole file → bundled defaults.
 		assertEquals("http://127.0.0.1:3000", config.middlewareBase());
 		assertEquals(true, config.publicReplies());
 	}

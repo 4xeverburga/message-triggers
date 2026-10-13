@@ -7,8 +7,9 @@ and when, is entirely your side.
 ## Channel
 
 `GET {middlewareBase}/api/ws` — the only endpoint, both directions.
-`middlewareBase` is user-configured (default `http://127.0.0.1:3000`;
-`http→ws`, `https→wss`), no auth (localhost-loopback trust model). The
+`middlewareBase` is user-configured (default `http://127.0.0.1:3000` — the
+middleware's WebSocket port; `http→ws`, `https→wss`), no auth
+(localhost-loopback trust model). The
 mod connects at boot and reconnects forever with backoff (1s → 30s).
 
 ## Client → server

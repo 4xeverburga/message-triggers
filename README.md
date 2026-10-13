@@ -44,8 +44,8 @@ Keys: `middlewareBase`, `triggerPhrase`, `thinkingAck`, `publicReplies`,
 
 Config lives at `<minecraft config dir>/messagetriggers/bridge.json`. When the
 file is missing or malformed, bundled defaults are used — the mod works out of
-the box with `middlewareBase = http://127.0.0.1:3000` and
-`triggerPhrase = @bot`.
+the box with `middlewareBase = http://127.0.0.1:3000` (the middleware's
+WebSocket port) and `triggerPhrase = @bot`.
 
 ## Building
 
